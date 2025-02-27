@@ -112,7 +112,7 @@ if (!file.exists(file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))) 
   
 } else {
   
-  plot_metrics_aoi_leafon <- readRDS(file.path(processed_data_dir, 'plot_metrics_pc_solling.RDS'))
+  plot_metrics_aoi_leafon <- readRDS(file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))
   
 }
 
