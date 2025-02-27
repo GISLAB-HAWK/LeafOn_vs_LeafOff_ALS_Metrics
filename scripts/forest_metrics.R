@@ -94,23 +94,25 @@ lidR::plot(pc_ctg_leafon, mapview = T,
 source('src/calc_metrics.R', local = T)
 
 
-# calculate the predefined metrics for each plot (radius = 13 m) 
+# calculate predefined metrics for each plot (radius = 13 m) 
 # within the normalized point cloud
-# 2 m height threshold according to literature
+# potential noise (points below 0 m) is ignored
 # save data frame with the plots and calculated metrics
 # if the data frame with the metrics already exists, read it
-if (!file.exists(paste0(processed_data_dir, 'plot_metrics_pc_solling.RDS'))) {
+if (!file.exists(file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))) {
   
-  lidR::opt_filter(ndsm_pc_ctg) <- '-drop_z_below 2'
+  lidR::opt_filter(pc_ctg_leafon) <- '-drop_z_below 0'
   
-  plot_metrics <- lidR::plot_metrics(ndsm_pc_ctg, ~calc_metrics(Z, R, B),
-                                     bi_plots_projected, radius = 13)
+  plot_metrics_aoi_leafon <- lidR::plot_metrics(
+    pc_ctg_leafon, ~calc_metrics(Z),
+    bi_plots_aoi_leafon, radius = 13)
   
-  saveRDS(plot_metrics, file = paste0(processed_data_dir, 'plot_metrics_pc_solling.RDS'))
+  saveRDS(plot_metrics_aoi_leafon, 
+          file = file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))
   
 } else {
   
-  plot_metrics <- readRDS(paste0(processed_data_dir, 'plot_metrics_pc_solling.RDS'))
+  plot_metrics_aoi_leafon <- readRDS(file.path(processed_data_dir, 'plot_metrics_pc_solling.RDS'))
   
 }
 
