@@ -169,22 +169,22 @@ if (!file.exists(file.path(output_dir, 'vol_ha_pred_aoi_leafoff.tif'))) {
   
 }
 
-
-
-
-
-
-
-
-
-
-
 # quick visualization
+par(mfrow = c(1,2))
 terra::plot(
   vol_ha_pred_aoi_leafon,
   col = grDevices::hcl.colors(
     n = 50, palette = 'YlGn', rev = T
-  )
+  ),
+  main = 'leaf-on'
+)
+
+terra::plot(
+  vol_ha_pred_aoi_leafoff,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-off'
 )
 
 
