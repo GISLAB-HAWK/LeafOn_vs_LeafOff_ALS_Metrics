@@ -1,7 +1,8 @@
 #-----------------------------------------------------------------------------
 # Name:         w2w_pred.R
 # Description:  Script predicts the growing stock (m³/ha) based on previously
-#               derived metrics in forest inventory plots.
+#               derived ALS-based metrics in forest inventory plots.
+#               A random forest trained before with ALS leaf-on data is used.
 #               The metrics derived on plot-level before are calculated on
 #               pixel-level to generate wall-to-wall raster of these metrics. 
 #               This is done twice, with leaf-on and leaf-off data.
