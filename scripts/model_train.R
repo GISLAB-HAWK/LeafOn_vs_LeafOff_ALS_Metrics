@@ -50,6 +50,7 @@ plot_metrics_aoi_leafon <- na.omit(plot_metrics_aoi_leafon)
 # split data into training and testing
 plot_metrics_aoi_leafon_df <- as.data.frame(plot_metrics_aoi_leafon)
 rownames(plot_metrics_aoi_leafon_df) <- 1:nrow(plot_metrics_aoi_leafon_df)
+plot_metrics_aoi_leafon_df <- plot_metrics_aoi_leafon_df[1:length(plot_metrics_aoi_leafon_df)-1]
 
 set.seed(11)
 
@@ -64,7 +65,7 @@ saveRDS(train, file.path(processed_data_dir, 'train_ds_leafon.RDS'))
 saveRDS(test, file.path(processed_data_dir, 'test_ds_leafon.RDS'))
 
 # define predictors and response
-predictors <- train[,7:31]
+predictors <- train[,7:length(train)]
 response <- train[,'vol_ha']
 
 # initialize leave-location-out cross-validation (LLO CV)
