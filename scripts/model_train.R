@@ -88,17 +88,17 @@ ctrl <- caret::trainControl(
   )
 
 # create grid for tuning features
-#tgrid <- expand.grid(
-#  mtry = 1:length(predictors),
-#  splitrule = 'variance',
-#  min.node.size = c(10,20,30,40,50)
-# )
-
 tgrid <- expand.grid(
-  mtry = 1:10,
+  mtry = 1:length(predictors),
   splitrule = 'variance',
   min.node.size = c(10,20,30,40,50)
-)
+ )
+
+#tgrid <- expand.grid(
+#  mtry = 1:10,
+#  splitrule = 'variance',
+#  min.node.size = c(10,20,30,40,50)
+#)
 
 
 
@@ -127,6 +127,7 @@ parallel::stopCluster(cl)
 # save trained model
 saveRDS(rf_model, file.path(output_dir, 'rf_model.RDS'))
 
+print(rf_model)
 summary(rf_model)
 
 # plot predicted vs. observed growing stock
