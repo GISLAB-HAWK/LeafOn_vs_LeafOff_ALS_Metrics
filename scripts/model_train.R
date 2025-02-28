@@ -60,6 +60,9 @@ trainIndex <- caret::createDataPartition(
 train <- plot_metrics_aoi_leafon_df[trainIndex,]
 test <- plot_metrics_aoi_leafon_df[-trainIndex,]
 
+saveRDS(train, file.path(processed_data_dir, 'train_ds_leafon.RDS'))
+saveRDS(test, file.path(processed_data_dir, 'test_ds_leafon.RDS'))
+
 # define predictors and response
 predictors <- train[,7:31]
 response <- train[,'vol_ha']
