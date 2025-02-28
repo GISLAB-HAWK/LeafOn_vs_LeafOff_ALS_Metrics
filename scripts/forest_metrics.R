@@ -96,15 +96,19 @@ source('src/calc_metrics.R', local = T)
 
 # calculate predefined metrics for each plot (radius = 13 m) 
 # within the normalized point cloud
-# potential noise (points below 0 m) is ignored
+# non-canopy elements (e.g. stones, shrubs --> points below 2 m) are ignored
 # save data frame with the plots and calculated metrics
 # if the data frame with the metrics already exists, read it
 if (!file.exists(file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))) {
   
-  lidR::opt_filter(pc_ctg_leafon) <- '-drop_z_below 0'
+  lidR::opt_filter(pc_ctg_leafon) <- '-drop_z_below 2'
+  
+  #plot_metrics_aoi_leafon <- lidR::plot_metrics(
+  #  pc_ctg_leafon, ~calc_metrics(Z),
+  #  bi_plots_aoi_leafon, radius = 13)
   
   plot_metrics_aoi_leafon <- lidR::plot_metrics(
-    pc_ctg_leafon, ~calc_metrics(Z),
+    pc_ctg_leafon, lidR::.stdmetrics,
     bi_plots_aoi_leafon, radius = 13)
   
   saveRDS(plot_metrics_aoi_leafon, 
