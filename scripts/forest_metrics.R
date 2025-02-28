@@ -76,7 +76,15 @@ lidR::crs(pc_ctg_leafon) <- lidR::crs(pc_ctg_leafoff)
 bi_plots <- sf::st_transform(bi_plots, sf::st_crs(25832))
 
 # crop BI plots to the area covered by leaf-on
-bi_plots_aoi_leafon <- sf::st_crop(bi_plots, pc_ctg_leafon) 
+bi_plots_aoi_leafon <- sf::st_crop(bi_plots, pc_ctg_leafon)
+
+# remove outliers (two exceptionally high volumes)
+boxplot(bi_plots_aoi_leafon$vol_ha)
+outliers <- boxplot.stats(bi_plots_aoi_leafon$vol_ha)$out
+bi_plots_aoi_leafon <- bi_plots_aoi_leafon[
+  !bi_plots_aoi_leafon$vol_ha %in% outliers, 
+  ] 
+boxplot(bi_plots_aoi_leafon$vol_ha)
 
 # visualize locations of the BI plots
 lidR::plot(pc_ctg_leafon, mapview = T, 
