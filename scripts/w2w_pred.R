@@ -1,13 +1,16 @@
-#--------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 # Name:         w2w_pred.R
-# Description:  Script models the growing stock (GS) based on previously
-#               derived metrics in terrestrial sample plots.
-#               Different model types are created and tested.
-#               Finally, wall-to-wall predictions of the GS for two entire
-#               forestry offices are calculated.
+# Description:  Script predicts the growing stock (m³/ha) based on previously
+#               derived metrics in forest inventory plots.
+#               The metrics derived on plot-level before are calculated on
+#               pixel-level to generate wall-to-wall raster of these metrics. 
+#               This is done twice, with leaf-on and leaf-off data.
+#               Finally, wall-to-wall predictions of the growing stock
+#               are generated, again twice with the pixel-metrics based on
+#               leaf-on data and with pixel-metrics based on leaf-off data.
 # Author:       Florian Franz
 # Contact:      florian.franz@nw-fva.de
-#--------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 
 
 
@@ -102,7 +105,10 @@ if (!file.exists(file.path(output_dir, 'metrics_w2w_aoi_leafoff.tif'))) {
 }
 
 # 2. predict growing stock for the whole area using random forest model
-# trained in script model_train.R
+# trained in script model_train.R with leaf-on data
+# two predictions:
+# one using the metrics calculated with leaf-on data,
+# and the other one using the metrics calculated with leaf-off data
 if (!file.exists(file.path(output_dir, 'vol_ha_pred_aoi_leafon.tif'))) {
   
   if (!exists('metrics_w2w_aoi_leafon.tif')) {
@@ -132,6 +138,46 @@ if (!file.exists(file.path(output_dir, 'vol_ha_pred_aoi_leafon.tif'))) {
     )
   
 }
+
+if (!file.exists(file.path(output_dir, 'vol_ha_pred_aoi_leafoff.tif'))) {
+  
+  if (!exists('metrics_w2w_aoi_leafoff.tif')) {
+    metrics_w2w_aoi_leafoff <- terra::rast(
+      file.path(output_dir, 'metrics_w2w_aoi_leafoff.tif')
+    )
+  }
+  
+  rf_model <- readRDS(file.path(output_dir, 'rf_model.RDS'))
+  
+  vol_ha_pred_aoi_leafoff <- terra::predict(
+    metrics_w2w_aoi_leafoff,
+    rf_model,
+    na.rm = T
+  )
+  
+  terra::writeRaster(
+    vol_ha_pred_aoi_leafoff,
+    file.path(output_dir, 'vol_ha_pred_aoi_leafoff.tif'),
+    overwrite = T
+  )
+  
+} else {
+  
+  vol_ha_pred_aoi_leafoff <- terra::rast(
+    file.path(output_dir, 'vol_ha_pred_aoi_leafoff.tif')
+  )
+  
+}
+
+
+
+
+
+
+
+
+
+
 
 # quick visualization
 terra::plot(
