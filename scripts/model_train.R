@@ -1,13 +1,14 @@
-#--------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 # Name:         model_train.R
-# Description:  Script models the growing stock (GS) based on previously
-#               derived metrics in terrestrial sample plots.
-#               Different model types are created and tested.
-#               Finally, wall-to-wall predictions of the GS for two entire
-#               forestry offices are calculated.
+# Description:  Script trains a random forest to model the growing stock (m³/ha).
+#               ALS-based metrics previously derived in forest inventory plots
+#               are used as predictors.
+#               Leave-Location-Out cross-validation (LLO CV) is used as a 
+#               spatial cross validation method.
+#               80% of the data is used for training, 20% for testing.
 # Author:       Florian Franz
 # Contact:      florian.franz@nw-fva.de
-#--------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 
 
 
@@ -63,7 +64,7 @@ test <- plot_metrics_aoi_leafon_df[-trainIndex,]
 predictors <- train[,7:31]
 response <- train[,'vol_ha']
 
-# initialize leave-location-out cross-validation (LLOCV)
+# initialize leave-location-out cross-validation (LLO CV)
 # this requires a spatial units variable as character
 # in this case, the 'kspnr' variable is used for this
 train$kspnr <- as.character(train$kspnr)
@@ -83,11 +84,11 @@ ctrl <- caret::trainControl(
   )
 
 # create grid for tuning features
-tgrid <- expand.grid(
-  mtry = 1:length(predictors),
-  splitrule = 'variance',
-  min.node.size = c(10,20,30,40,50)
-  )
+#tgrid <- expand.grid(
+#  mtry = 1:length(predictors),
+#  splitrule = 'variance',
+#  min.node.size = c(10,20,30,40,50)
+# )
 
 tgrid <- expand.grid(
   mtry = 1:10,
@@ -124,7 +125,7 @@ saveRDS(rf_model, file.path(output_dir, 'rf_model.RDS'))
 
 summary(rf_model)
 
-
+# plot predicted vs. observed growing stock
 library(ggplot2)
 ggplot(train, aes(x=vol_ha, y=stats::predict(rf_model))) +
   geom_point() +
