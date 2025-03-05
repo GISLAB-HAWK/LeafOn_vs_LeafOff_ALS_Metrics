@@ -61,10 +61,16 @@ source('src/calc_metrics.R', local = T)
 # this is done twice, for leaf-on and for leaf-off data
 if (!file.exists(file.path(output_dir, 'metrics_w2w_aoi_leafon.tif'))) {
   
-  lidR::opt_filter(pc_ctg_leafon) <- '-drop_z_below 0'
+  lidR::opt_filter(pc_ctg_leafon) <- '-drop_z_below 2'
+  
+  #metrics_w2w_aoi_leafon <- lidR::pixel_metrics(
+  #  pc_ctg_leafon, ~calc_metrics(Z),
+  #  res = 20,
+  #  pkg = 'terra'
+  #)
   
   metrics_w2w_aoi_leafon <- lidR::pixel_metrics(
-    pc_ctg_leafon, ~calc_metrics(Z),
+    pc_ctg_leafon, .stdmetrics,
     res = 20,
     pkg = 'terra'
   )
@@ -84,10 +90,16 @@ if (!file.exists(file.path(output_dir, 'metrics_w2w_aoi_leafon.tif'))) {
 
 if (!file.exists(file.path(output_dir, 'metrics_w2w_aoi_leafoff.tif'))) {
   
-  lidR::opt_filter(pc_ctg_leafoff) <- '-drop_z_below 0'
+  lidR::opt_filter(pc_ctg_leafoff) <- '-drop_z_below 2'
+  
+  #metrics_w2w_aoi_leafoff <- lidR::pixel_metrics(
+  #  pc_ctg_leafoff, ~calc_metrics(Z),
+  #  res = 20,
+  #  pkg = 'terra'
+  #)
   
   metrics_w2w_aoi_leafoff <- lidR::pixel_metrics(
-    pc_ctg_leafoff, ~calc_metrics(Z),
+    pc_ctg_leafoff, .stdmetrics,
     res = 20,
     pkg = 'terra'
   )
