@@ -200,6 +200,36 @@ terra::plot(
   main = 'leaf-off'
 )
 
+# crop leaf-on prediction to leaf-off prediction
+vol_ha_pred_aoi_leafon_cropped <- terra::crop(
+  vol_ha_pred_aoi_leafon,
+  vol_ha_pred_aoi_leafoff,
+  mask = T
+)
+
+# write to disk
+terra::writeRaster(
+  vol_ha_pred_aoi_leafon_cropped,
+  file.path(output_dir, 'vol_ha_pred_aoi_leafon_cropped.tif')
+  )
+
+# quick visualization
+par(mfrow = c(1,2))
+terra::plot(
+  vol_ha_pred_aoi_leafon_cropped,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-on'
+)
+
+terra::plot(
+  vol_ha_pred_aoi_leafoff,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-off'
+)
 
 
 
