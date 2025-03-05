@@ -75,16 +75,26 @@ lidR::crs(pc_ctg_leafon) <- lidR::crs(pc_ctg_leafoff)
 # DHDN / 3-degree Gauss-Kruger zone 3 --> ETRS89 / UTM zone 32N
 bi_plots <- sf::st_transform(bi_plots, sf::st_crs(25832))
 
-# crop BI plots to the area covered by leaf-on
+# crop BI plots to the area covered by leaf-on and leaf-off
 bi_plots_aoi_leafon <- sf::st_crop(bi_plots, pc_ctg_leafon)
+bi_plots_aoi_leafoff <- sf::st_crop(bi_plots, pc_ctg_leafoff)
 
 # remove outliers (two exceptionally high volumes)
 boxplot(bi_plots_aoi_leafon$vol_ha)
-outliers <- boxplot.stats(bi_plots_aoi_leafon$vol_ha)$out
+boxplot(bi_plots_aoi_leafoff$vol_ha)
+
+outliers_leafon_ds <- boxplot.stats(bi_plots_aoi_leafon$vol_ha)$out
+outliers_leafoff_ds <- boxplot.stats(bi_plots_aoi_leafoff$vol_ha)$out
+
 bi_plots_aoi_leafon <- bi_plots_aoi_leafon[
-  !bi_plots_aoi_leafon$vol_ha %in% outliers, 
+  !bi_plots_aoi_leafon$vol_ha %in% outliers_leafon_ds, 
   ] 
+bi_plots_aoi_leafoff <- bi_plots_aoi_leafoff[
+  !bi_plots_aoi_leafoff$vol_ha %in% outliers_leafoff_ds, 
+  ] 
+
 boxplot(bi_plots_aoi_leafon$vol_ha)
+boxplot(bi_plots_aoi_leafoff$vol_ha)
 
 # visualize locations of the BI plots
 lidR::plot(pc_ctg_leafon, mapview = T, 
@@ -93,17 +103,20 @@ lidR::plot(pc_ctg_leafon, mapview = T,
   
   mapview::mapview(bi_plots_aoi_leafon, col.regions = 'black', cex = 5)
 
+lidR::plot(pc_ctg_leafoff, mapview = T, 
+           map.type = 'OpenStreetMap',
+           alpha.regions = 0) +
+  
+  mapview::mapview(bi_plots_aoi_leafoff, col.regions = 'black', cex = 5)
+
 
 
 # 04 - calculation of metrics
 #--------------------------------------------------------
 
-# source function for metrics calculation
-source('src/calc_metrics.R', local = T)
-
-
 # calculate predefined metrics for each plot (radius = 13 m) 
-# within the normalized point cloud
+# within the normalized point clouds (leaf-on and leaf-off)
+# the .stdmetrics function implemented in the lidR package is used
 # non-canopy elements (e.g. stones, shrubs --> points below 2 m) are ignored
 # save data frame with the plots and calculated metrics
 # if the data frame with the metrics already exists, read it
@@ -111,20 +124,39 @@ if (!file.exists(file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))) 
   
   lidR::opt_filter(pc_ctg_leafon) <- '-drop_z_below 2'
   
-  #plot_metrics_aoi_leafon <- lidR::plot_metrics(
-  #  pc_ctg_leafon, ~calc_metrics(Z),
-  #  bi_plots_aoi_leafon, radius = 13)
-  
   plot_metrics_aoi_leafon <- lidR::plot_metrics(
     pc_ctg_leafon, lidR::.stdmetrics,
     bi_plots_aoi_leafon, radius = 13)
   
-  saveRDS(plot_metrics_aoi_leafon, 
-          file = file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))
+  saveRDS(
+    plot_metrics_aoi_leafon, 
+    file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS')
+    )
   
 } else {
   
-  plot_metrics_aoi_leafon <- readRDS(file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))
+  plot_metrics_aoi_leafon <- readRDS(
+    file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS')
+    )
+  
+}
+
+if (!file.exists(file.path(processed_data_dir, 'plot_metrics_aoi_leafoff.RDS'))) {
+  
+  lidR::opt_filter(pc_ctg_leafoff) <- '-drop_z_below 2'
+  
+  plot_metrics_aoi_leafoff <- lidR::plot_metrics(
+    pc_ctg_leafoff, lidR::.stdmetrics,
+    bi_plots_aoi_leafoff, radius = 13)
+  
+  saveRDS(
+    plot_metrics_aoi_leafoff, 
+    file.path(processed_data_dir, 'plot_metrics_aoi_leafoff.RDS'))
+  
+} else {
+  
+  plot_metrics_aoi_leafoff <- readRDS(
+    file.path(processed_data_dir, 'plot_metrics_aoi_leafoff.RDS'))
   
 }
 
