@@ -47,10 +47,6 @@ pc_ctg_leafon <- lidR::readLAScatalog(path_pc_leafon)
 pc_ctg_leafoff
 pc_ctg_leafon
 
-# quick plot
-lidR::plot(pc_ctg_leafoff)
-lidR::plot(pc_ctg_leafon)
-
 # read forest inventory data (BI plots)
 # contains timber volume per sample plot
 bi_plots <- sf::st_read(file.path(path_forest_inventory, 'vol_stp.gpkg'))
@@ -75,39 +71,41 @@ lidR::crs(pc_ctg_leafon) <- lidR::crs(pc_ctg_leafoff)
 # DHDN / 3-degree Gauss-Kruger zone 3 --> ETRS89 / UTM zone 32N
 bi_plots <- sf::st_transform(bi_plots, sf::st_crs(25832))
 
-# crop BI plots to the area covered by leaf-on and leaf-off
-bi_plots_aoi_leafon <- sf::st_crop(bi_plots, pc_ctg_leafon)
-bi_plots_aoi_leafoff <- sf::st_crop(bi_plots, pc_ctg_leafoff)
+# quick plot
+par(mfrow = c(1,2))
+lidR::plot(pc_ctg_leafoff)
+terra::plot(bi_plots$geom, col = 'red', add = T)
+lidR::plot(pc_ctg_leafon)
+terra::plot(bi_plots$geom, col = 'red', add = T)
+
+# crop BI plots to the area only covered by leaf-off point clouds
+# leaf-off covers a slightly smaller area than leaf-on
+bi_plots_aoi <- sf::st_crop(bi_plots, pc_ctg_leafoff)
 
 # remove outliers (two exceptionally high volumes)
-boxplot(bi_plots_aoi_leafon$vol_ha)
-boxplot(bi_plots_aoi_leafoff$vol_ha)
+par(mfrow = c(1,1))
+boxplot(bi_plots_aoi$vol_ha)
 
-outliers_leafon_ds <- boxplot.stats(bi_plots_aoi_leafon$vol_ha)$out
-outliers_leafoff_ds <- boxplot.stats(bi_plots_aoi_leafoff$vol_ha)$out
+outliers <- boxplot.stats(bi_plots_aoi$vol_ha)$out
 
-bi_plots_aoi_leafon <- bi_plots_aoi_leafon[
-  !bi_plots_aoi_leafon$vol_ha %in% outliers_leafon_ds, 
-  ] 
-bi_plots_aoi_leafoff <- bi_plots_aoi_leafoff[
-  !bi_plots_aoi_leafoff$vol_ha %in% outliers_leafoff_ds, 
-  ] 
+bi_plots_aoi <- bi_plots_aoi[
+  !bi_plots_aoi$vol_ha %in% outliers, 
+  ]
 
-boxplot(bi_plots_aoi_leafon$vol_ha)
-boxplot(bi_plots_aoi_leafoff$vol_ha)
+boxplot(bi_plots_aoi$vol_ha)
 
 # visualize locations of the BI plots
 lidR::plot(pc_ctg_leafon, mapview = T, 
            map.type = 'OpenStreetMap',
            alpha.regions = 0) +
   
-  mapview::mapview(bi_plots_aoi_leafon, col.regions = 'black', cex = 5)
+  mapview::mapview(bi_plots_aoi, col.regions = 'black', cex = 5)
 
 lidR::plot(pc_ctg_leafoff, mapview = T, 
            map.type = 'OpenStreetMap',
            alpha.regions = 0) +
   
-  mapview::mapview(bi_plots_aoi_leafoff, col.regions = 'black', cex = 5)
+  mapview::mapview(bi_plots_aoi, col.regions = 'black', cex = 5)
 
 
 
@@ -120,43 +118,43 @@ lidR::plot(pc_ctg_leafoff, mapview = T,
 # non-canopy elements (e.g. stones, shrubs --> points below 2 m) are ignored
 # save data frame with the plots and calculated metrics
 # if the data frame with the metrics already exists, read it
-if (!file.exists(file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS'))) {
+if (!file.exists(file.path(processed_data_dir, 'plot_metrics_leafon.RDS'))) {
   
   lidR::opt_filter(pc_ctg_leafon) <- '-drop_z_below 2'
   
-  plot_metrics_aoi_leafon <- lidR::plot_metrics(
+  plot_metrics_leafon <- lidR::plot_metrics(
     pc_ctg_leafon, lidR::.stdmetrics,
-    bi_plots_aoi_leafon, radius = 13)
+    bi_plots_aoi, radius = 13)
   
   saveRDS(
-    plot_metrics_aoi_leafon, 
-    file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS')
+    plot_metrics_leafon, 
+    file.path(processed_data_dir, 'plot_metrics_leafon.RDS')
     )
   
 } else {
   
-  plot_metrics_aoi_leafon <- readRDS(
-    file.path(processed_data_dir, 'plot_metrics_aoi_leafon.RDS')
+  plot_metrics_leafon <- readRDS(
+    file.path(processed_data_dir, 'plot_metrics_leafon.RDS')
     )
   
 }
 
-if (!file.exists(file.path(processed_data_dir, 'plot_metrics_aoi_leafoff.RDS'))) {
+if (!file.exists(file.path(processed_data_dir, 'plot_metrics_leafoff.RDS'))) {
   
   lidR::opt_filter(pc_ctg_leafoff) <- '-drop_z_below 2'
   
-  plot_metrics_aoi_leafoff <- lidR::plot_metrics(
+  plot_metrics_leafoff <- lidR::plot_metrics(
     pc_ctg_leafoff, lidR::.stdmetrics,
-    bi_plots_aoi_leafoff, radius = 13)
+    bi_plots_aoi, radius = 13)
   
   saveRDS(
-    plot_metrics_aoi_leafoff, 
-    file.path(processed_data_dir, 'plot_metrics_aoi_leafoff.RDS'))
+    plot_metrics_leafoff, 
+    file.path(processed_data_dir, 'plot_metrics_leafoff.RDS'))
   
 } else {
   
-  plot_metrics_aoi_leafoff <- readRDS(
-    file.path(processed_data_dir, 'plot_metrics_aoi_leafoff.RDS'))
+  plot_metrics_leafoff <- readRDS(
+    file.path(processed_data_dir, 'plot_metrics_leafoff.RDS'))
   
 }
 
