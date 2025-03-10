@@ -52,67 +52,52 @@ lidR::crs(pc_ctg_leafon) <- lidR::crs(pc_ctg_leafoff)
 # 03 - wall-to-wall modeling
 #-------------------------------------
 
-# source function for metrics calculation
-source('src/calc_metrics.R', local = T)
-
 # 1. calculate forest metrics for the entire collection of files
 # (normalized point clouds in LAScatalog)
 # output resolution of the metrics = 20 m (13 m plot radius = 531 m²)
 # this is done twice, for leaf-on and for leaf-off data
-if (!file.exists(file.path(output_dir, 'metrics_w2w_aoi_leafon.tif'))) {
+if (!file.exists(file.path(output_dir, 'metrics_w2w_leafon.tif'))) {
   
   lidR::opt_filter(pc_ctg_leafon) <- '-drop_z_below 2'
   
-  #metrics_w2w_aoi_leafon <- lidR::pixel_metrics(
-  #  pc_ctg_leafon, ~calc_metrics(Z),
-  #  res = 20,
-  #  pkg = 'terra'
-  #)
-  
-  metrics_w2w_aoi_leafon <- lidR::pixel_metrics(
+  metrics_w2w_leafon <- lidR::pixel_metrics(
     pc_ctg_leafon, .stdmetrics,
     res = 20,
     pkg = 'terra'
   )
   
   terra::writeRaster(
-    metrics_w2w_aoi_leafon,
-    file.path(output_dir, 'metrics_w2w_aoi_leafon.tif'),
+    metrics_w2w_leafon,
+    file.path(output_dir, 'metrics_w2w_leafon.tif'),
     overwrite = T)
   
 } else {
   
-  metrics_w2w_aoi_leafon <- terra::rast(
-    file.path(output_dir, 'metrics_w2w_aoi_leafon.tif')
+  metrics_w2w_leafon <- terra::rast(
+    file.path(output_dir, 'metrics_w2w_leafon.tif')
     )
   
 }
 
-if (!file.exists(file.path(output_dir, 'metrics_w2w_aoi_leafoff.tif'))) {
+if (!file.exists(file.path(output_dir, 'metrics_w2w_leafoff.tif'))) {
   
   lidR::opt_filter(pc_ctg_leafoff) <- '-drop_z_below 2'
   
-  #metrics_w2w_aoi_leafoff <- lidR::pixel_metrics(
-  #  pc_ctg_leafoff, ~calc_metrics(Z),
-  #  res = 20,
-  #  pkg = 'terra'
-  #)
-  
-  metrics_w2w_aoi_leafoff <- lidR::pixel_metrics(
+  metrics_w2w_leafoff <- lidR::pixel_metrics(
     pc_ctg_leafoff, .stdmetrics,
     res = 20,
     pkg = 'terra'
   )
   
   terra::writeRaster(
-    metrics_w2w_aoi_leafoff,
-    file.path(output_dir, 'metrics_w2w_aoi_leafoff.tif'),
+    metrics_w2w_leafoff,
+    file.path(output_dir, 'metrics_w2w_leafoff.tif'),
     overwrite = T)
   
 } else {
   
-  metrics_w2w_aoi_leafoff <- terra::rast(
-    file.path(output_dir, 'metrics_w2w_aoi_leafoff.tif')
+  metrics_w2w_leafoff <- terra::rast(
+    file.path(output_dir, 'metrics_w2w_leafoff.tif')
   )
   
 }
@@ -122,115 +107,222 @@ if (!file.exists(file.path(output_dir, 'metrics_w2w_aoi_leafoff.tif'))) {
 # two predictions:
 # one using the metrics calculated with leaf-on data,
 # and the other one using the metrics calculated with leaf-off data
-if (!file.exists(file.path(output_dir, 'vol_ha_pred_aoi_leafon.tif'))) {
+
+# leaf-on model --> predicted on leaf-on data
+if (!file.exists(file.path(output_dir, 'vol_ha_pred_leafon.tif'))) {
   
-  if (!exists('metrics_w2w_aoi_leafon.tif')) {
-    metrics_w2w_aoi_leafon <- terra::rast(
-      file.path(output_dir, 'metrics_w2w_aoi_leafon.tif')
+  if (!exists('metrics_w2w_leafon.tif')) {
+    metrics_w2w_leafon <- terra::rast(
+      file.path(output_dir, 'metrics_w2w_leafon.tif')
       )
   }
   
-  rf_model <- readRDS(file.path(output_dir, 'rf_model.RDS'))
+  rf_model_leafon <- readRDS(file.path(output_dir, 'rf_model_leafon.RDS'))
   
-  vol_ha_pred_aoi_leafon <- terra::predict(
-    metrics_w2w_aoi_leafon,
-    rf_model,
+  vol_ha_pred_leafon <- terra::predict(
+    metrics_w2w_leafon,
+    rf_model_leafon,
     na.rm = T
     )
   
   terra::writeRaster(
-    vol_ha_pred_aoi_leafon,
-    file.path(output_dir, 'vol_ha_pred_aoi_leafon.tif'),
+    vol_ha_pred_leafon,
+    file.path(output_dir, 'vol_ha_pred_leafon.tif'),
     overwrite = T
     )
   
 } else {
   
-  vol_ha_pred_aoi_leafon <- terra::rast(
-    file.path(output_dir, 'vol_ha_pred_aoi_leafon.tif')
+  vol_ha_pred_leafon <- terra::rast(
+    file.path(output_dir, 'vol_ha_pred_leafon.tif')
     )
   
 }
 
-if (!file.exists(file.path(output_dir, 'vol_ha_pred_aoi_leafoff.tif'))) {
+# leaf-off model --> predicted on leaf-off data
+if (!file.exists(file.path(output_dir, 'vol_ha_pred_leafoff.tif'))) {
   
-  if (!exists('metrics_w2w_aoi_leafoff.tif')) {
-    metrics_w2w_aoi_leafoff <- terra::rast(
-      file.path(output_dir, 'metrics_w2w_aoi_leafoff.tif')
+  if (!exists('metrics_w2w_leafoff.tif')) {
+    metrics_w2w_leafoff <- terra::rast(
+      file.path(output_dir, 'metrics_w2w_leafoff.tif')
     )
   }
   
-  rf_model <- readRDS(file.path(output_dir, 'rf_model.RDS'))
+  rf_model_leafoff <- readRDS(file.path(output_dir, 'rf_model_leafoff.RDS'))
   
-  vol_ha_pred_aoi_leafoff <- terra::predict(
-    metrics_w2w_aoi_leafoff,
-    rf_model,
+  vol_ha_pred_leafoff <- terra::predict(
+    metrics_w2w_leafoff,
+    rf_model_leafoff,
     na.rm = T
   )
   
   terra::writeRaster(
-    vol_ha_pred_aoi_leafoff,
-    file.path(output_dir, 'vol_ha_pred_aoi_leafoff.tif'),
+    vol_ha_pred_leafoff,
+    file.path(output_dir, 'vol_ha_pred_leafoff.tif'),
     overwrite = T
   )
   
 } else {
   
-  vol_ha_pred_aoi_leafoff <- terra::rast(
-    file.path(output_dir, 'vol_ha_pred_aoi_leafoff.tif')
+  vol_ha_pred_leafoff <- terra::rast(
+    file.path(output_dir, 'vol_ha_pred_leafoff.tif')
   )
   
 }
 
-# quick visualization
-par(mfrow = c(1,2))
-terra::plot(
-  vol_ha_pred_aoi_leafon,
-  col = grDevices::hcl.colors(
-    n = 50, palette = 'YlGn', rev = T
-  ),
-  main = 'leaf-on'
+# leaf-on model --> predicted on leaf-off data
+if (!file.exists(file.path(output_dir, 'vol_ha_pred_leafon_leafoff.tif'))) {
+  
+  if (!exists('metrics_w2w_leafoff.tif')) {
+    metrics_w2w_leafoff <- terra::rast(
+      file.path(output_dir, 'metrics_w2w_leafoff.tif')
+    )
+  }
+  
+  rf_model_leafon <- readRDS(file.path(output_dir, 'rf_model_leafon.RDS'))
+  
+  vol_ha_pred_leafon_leafoff <- terra::predict(
+    metrics_w2w_leafoff,
+    rf_model_leafon,
+    na.rm = T
+  )
+  
+  terra::writeRaster(
+    vol_ha_pred_leafon_leafoff,
+    file.path(output_dir, 'vol_ha_pred_leafon_leafoff.tif'),
+    overwrite = T
+  )
+  
+} else {
+  
+  vol_ha_pred_leafon_leafoff <- terra::rast(
+    file.path(output_dir, 'vol_ha_pred_leafon_leafoff.tif')
+  )
+  
+}
+
+# leaf-off model --> predicted on leaf-on data
+if (!file.exists(file.path(output_dir, 'vol_ha_pred_leafoff_leafon.tif'))) {
+  
+  if (!exists('metrics_w2w_leafon.tif')) {
+    metrics_w2w_leafon <- terra::rast(
+      file.path(output_dir, 'metrics_w2w_leafon.tif')
+    )
+  }
+  
+  rf_model_leafoff <- readRDS(file.path(output_dir, 'rf_model_leafoff.RDS'))
+  
+  vol_ha_pred_leafoff_leafon <- terra::predict(
+    metrics_w2w_leafon,
+    rf_model_leafoff,
+    na.rm = T
+  )
+  
+  terra::writeRaster(
+    vol_ha_pred_leafoff_leafon,
+    file.path(output_dir, 'vol_ha_pred_leafoff_leafon.tif'),
+    overwrite = T
+  )
+  
+} else {
+  
+  vol_ha_pred_leafoff_leafon <- terra::rast(
+    file.path(output_dir, 'vol_ha_pred_leafoff_leafon.tif')
+  )
+  
+}
+
+# crop leaf-on predictions to leaf-off prediction
+vol_ha_pred_leafon_cropped <- terra::crop(
+  vol_ha_pred_leafon,
+  vol_ha_pred_leafoff,
+  mask = T
 )
 
-terra::plot(
-  vol_ha_pred_aoi_leafoff,
-  col = grDevices::hcl.colors(
-    n = 50, palette = 'YlGn', rev = T
-  ),
-  main = 'leaf-off'
-)
-
-# crop leaf-on prediction to leaf-off prediction
-vol_ha_pred_aoi_leafon_cropped <- terra::crop(
-  vol_ha_pred_aoi_leafon,
-  vol_ha_pred_aoi_leafoff,
+vol_ha_pred_leafoff_leafon_cropped <- terra::crop(
+  vol_ha_pred_leafoff_leafon,
+  vol_ha_pred_leafon_leafoff,
   mask = T
 )
 
 # write to disk
 terra::writeRaster(
-  vol_ha_pred_aoi_leafon_cropped,
-  file.path(output_dir, 'vol_ha_pred_aoi_leafon_cropped.tif')
+  vol_ha_pred_leafon_cropped,
+  file.path(output_dir, 'vol_ha_pred_leafon_cropped.tif')
   )
+
+terra::writeRaster(
+  vol_ha_pred_leafoff_leafon_cropped,
+  file.path(output_dir, 'vol_ha_pred_leafoff_leafon_cropped.tif')
+)
 
 # quick visualization
 par(mfrow = c(1,2))
 terra::plot(
-  vol_ha_pred_aoi_leafon_cropped,
+  vol_ha_pred_leafon_cropped,
   col = grDevices::hcl.colors(
     n = 50, palette = 'YlGn', rev = T
   ),
-  main = 'leaf-on'
+  main = 'leaf-on model - leaf-on prediction'
 )
 
 terra::plot(
-  vol_ha_pred_aoi_leafoff,
+  vol_ha_pred_leafoff,
   col = grDevices::hcl.colors(
     n = 50, palette = 'YlGn', rev = T
   ),
-  main = 'leaf-off'
+  main = 'leaf-off model - leaf-off prediction'
 )
 
+par(mfrow = c(1,2))
+terra::plot(
+  vol_ha_pred_leafoff_leafon_cropped,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-off model - leaf-on prediction'
+)
+
+terra::plot(
+  vol_ha_pred_leafon_leafoff,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-on model - leaf-off prediction'
+)
+
+par(mfrow = c(1,4))
+terra::plot(
+  vol_ha_pred_leafon_cropped,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-on model - leaf-on prediction'
+)
+
+terra::plot(
+  vol_ha_pred_leafoff,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-off model - leaf-off prediction'
+)
+
+terra::plot(
+  vol_ha_pred_leafoff_leafon_cropped,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-off model - leaf-on prediction'
+)
+
+terra::plot(
+  vol_ha_pred_leafon_leafoff,
+  col = grDevices::hcl.colors(
+    n = 50, palette = 'YlGn', rev = T
+  ),
+  main = 'leaf-on model - leaf-off prediction'
+)
 
 
 
