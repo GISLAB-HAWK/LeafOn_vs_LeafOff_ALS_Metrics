@@ -4,7 +4,10 @@
 #               (Betriebsionventur (BI) Lower Saxony).
 #               Inventory data is first pre-processed and then single tree volumes
 #               are calculated. These tree volumes are aggregated per sample plot
-#               to obtain the growing stock [m³/ha].
+#               to obtain the growing stock volume (GSV) [m³/ha].
+#               The final plots with the calculated GSV are clipped to the 
+#               area of interest (AOI), which is the area covered by both
+#               leaf-off and leaf-on airborne laser scanning (ALS) datasets.
 # Author:       Christoph Fischer, Georgia Reeves, Florian Franz
 # Contact:      christoph.fischer@nw-fva.de
 #-------------------------------------------------------------------------------
@@ -18,10 +21,12 @@ source('src/setup.R', local = TRUE)
 # 01: data reading
 #-------------------------------------------------------------------------------
 
-# input path to forest inventory data (BI)
+# input paths
 bi_path <- file.path(raw_data_dir, 'forest_inventory')
+pc_loff_path <- file.path(raw_data_dir, 'pc_leafoff_2024')
+pc_lon_path <- file.path(raw_data_dir, 'pc_leafon_2023')
 
-# read BI data
+# read forest inventory (BI) data
 bi_data <- list.files(bi_path)
 
 bi_points <- read.table(
@@ -48,12 +53,19 @@ bi_trees <- bi_trees[
 head(bi_points)
 head(bi_trees)
 
+# read point clouds with LAScatalog
+pc_ctg_loff <- lidR::readLAScatalog(pc_loff_path)
+pc_ctg_lon <- lidR::readLAScatalog(pc_lon_path)
+
+pc_ctg_loff
+pc_ctg_lon
+
 
 
 # 02: data preparation
 #-------------------------------------------------------------------------------
 
-## source and apply function for data formatting ----
+# source and apply function for data formatting
 source('src/format_data.R', local = TRUE)
 
 bi_points <- format_data(bi_points)
@@ -339,7 +351,10 @@ head(vol_stp)
 summary(vol_stp)
 boxplot(vol_stp$vol_ha)
 
-# creation of an sf object and transformation to UTM
+
+
+# 05: clip sample plots to the AOI
+#-------------------------------------------------------------------------------
 
 # conversion to sf object (DHDN / 3-degree Gauss-Kruger zone 3)
 vol_stp_gk <- sf::st_as_sf(vol_stp, coords = c('rw', 'hw'), crs = 31467)
@@ -347,9 +362,41 @@ vol_stp_gk <- sf::st_as_sf(vol_stp, coords = c('rw', 'hw'), crs = 31467)
 # transformation to ETRS89 / UTM zone 32N
 vol_stp_utm <- sf::st_transform(vol_stp_gk, crs = 25832)
 
+# quick plot
+par(mfrow = c(1,2))
+lidR::plot(pc_ctg_loff)
+terra::plot(vol_stp_utm$geom, col = 'red', add = T)
+lidR::plot(pc_ctg_lon)
+terra::plot(vol_stp_utm$geom, col = 'red', add = T)
+
+# clip BI plots to the area only covered by leaf-off point clouds
+# leaf-off covers a slightly smaller area than leaf-on
+vol_stp_aoi <- sf::st_intersection(vol_stp_utm, sf::st_as_sf(pc_ctg_loff))
+
+# keep only the original columns from vol_stp_utm 
+# (remove LAScatalog columns)
+original_cols <- names(vol_stp_utm)
+vol_stp_aoi <- vol_stp_aoi[, original_cols]
+
+summary(vol_stp_aoi$vol_ha)
+par(mfrow = c(1,1))
+boxplot(vol_stp_aoi$vol_ha)
+
+# visualize locations of the BI plots
+lidR::plot(pc_ctg_lon, mapview = T, 
+           map.type = 'OpenStreetMap',
+           alpha.regions = 0) +
+  
+  mapview::mapview(vol_stp_aoi, col.regions = 'black', cex = 5)
+
+lidR::plot(pc_ctg_loff, mapview = T, 
+           map.type = 'OpenStreetMap',
+           alpha.regions = 0) +
+  
+  mapview::mapview(vol_stp_aoi, col.regions = 'black', cex = 5)
 
 
-# 05: save data with the extracted volumes per sample plot
+# 06: save BI plots with the GSV per sample plot - located in the AOI
 #-------------------------------------------------------------------------------
 
 # rds
@@ -357,7 +404,8 @@ out_path <- file.path(processed_data_dir, 'forest_inventory')
 
 if (!file.exists(file.path(out_path, 'vol_stp.RDS'))) {
   
-  saveRDS(vol_stp, file = file.path(out_path, 'vol_stp.RDS'))
+  vol_stp_aoi_no_geom <- sf::st_drop_geometry(vol_stp_aoi)
+  saveRDS(vol_stp_aoi_no_geom, file = file.path(out_path, 'vol_stp.RDS'))
   
 } else {
   
@@ -368,8 +416,9 @@ if (!file.exists(file.path(out_path, 'vol_stp.RDS'))) {
 # txt
 if (!file.exists(file.path(out_path, 'vol_stp.txt'))) {
   
+  vol_stp_aoi_no_geom <- sf::st_drop_geometry(vol_stp_aoi)
   write.table(
-    vol_stp, 
+    vol_stp_aoi_no_geom, 
     file = file.path(out_path, 'vol_stp.txt'), 
     sep = ';',
     row.names = F
@@ -384,7 +433,7 @@ if (!file.exists(file.path(out_path, 'vol_stp.txt'))) {
 # gpkg
 if (!file.exists(file.path(out_path, 'vol_stp.gpkg'))) {
   
-  sf::st_write(vol_stp_utm, dsn = file.path(out_path, 'vol_stp.gpkg'))
+  sf::st_write(vol_stp_aoi, dsn = file.path(out_path, 'vol_stp.gpkg'))
   
 } else {
   
