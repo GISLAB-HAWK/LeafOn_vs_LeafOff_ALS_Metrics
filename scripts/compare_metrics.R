@@ -2,13 +2,15 @@
 
 library(terra)
 library(dplyr)
+library(tidyverse)
 library(corrplot)
 library(ggplot2)
+library(ggfortify)
 
 
 # path to indices files 
-loff_file <- "R:/AG_Magdon/projekte/foreslab/data/als/solling/leaf-on_leaf-off_data/solling24_leafoff_indices/data/solling24_leafoff_indices__0_0___.tiff"
-lon_file <- "R:/AG_Magdon/projekte/foreslab/data/als/solling/leaf-on_leaf-off_data/solling23_leafon_indices/data/solling23_leafon_indices__0_0___.tiff"
+loff_file <- "R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/03_indices/loff24_indices/data/solling24_leafoff_indices__0_0___.tiff"
+lon_file <-  "R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/solling23_leafon_indices/data/solling23_leafon_indices__0_0___.tiff"
 
 # read raster files 
 loff_r <- rast(loff_file)
@@ -24,22 +26,84 @@ mask <- is.na(lon_r) | is.na(loff_r) | (lon_r == 0) | (loff_r == 0)
 loff_r <- mask(loff_r, mask, maskvalue = TRUE)
 lon_r <- mask(lon_r, mask, maskvalue = TRUE)
 
-# rename bands for clarity 
-names(loff_r) <-  paste0(names(loff_r), "_loff")
-names(lon_r) <-  paste0(names(lon_r), "_lon")
-
 # plot some bands 
 par(mfrow = c(1,2))
 plot(loff_r[[3]])
 plot(lon_r[[3]])
 
-# combine the two layer
-r <- c(loff_r,lon_r)
 
 # extract data
-df <- as.data.frame(r, na.rm = TRUE)
 lon_df <- as.data.frame(lon_r, na.rm = T)
 loff_df <- as.data.frame(loff_r, na.rm = T)
+
+## unpaired t-test
+map_dfr(names(lon_df), function(var) {
+  data.frame(
+    variable = var,
+    p_value = t.test(lon_df[[var]], loff_df[[var]])$p.value
+  )
+})
+
+
+lon_df$season <- "leaf on"
+loff_df$season<- "leaf off"
+
+
+# Pivot data wider: one row per variable
+df_wide <- df_long %>%
+  pivot_wider(names_from = season, values_from = value)%>%
+  rename(leaf_on = `leaf on`,
+         leaf_off = `leaf off`)
+
+## scatterplot 
+ggplot(df_wide, aes(x = leaf_on, y = leaf_off)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(
+    title = "Leaf-On vs Leaf-Off Comparison per Variable",
+    x = "Leaf-On Value",
+    y = "Leaf-Off Value"
+  )
+
+
+
+
+# Combine and pivot to long format
+df_long <- bind_rows(lon_df, loff_df) %>%    
+  pivot_longer(
+    cols = -season,
+    names_to = "variable",
+    values_to = "value"
+  )
+
+
+df_summary <- df_long %>%
+  group_by(season, variable) %>%
+  summarise(mean = mean(value), sd = sd(value))
+
+## violon plot
+
+ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
+  geom_violin(trim = FALSE) +
+  facet_wrap(~ variable, nrow = 3, ncol = 4, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Metric Comparison Leaf off vs. leaf on",
+       x = "",
+       y = "Value") +
+  theme(legend.position = "none")
+
+## density plot
+ggplot(df_long, aes(x = value, fill = season)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ variable, scales = "free", ncol = 4) +
+  theme_minimal() +
+  labs(title = "Metric Comparison Leaf off vs. leaf on",
+       x = "",
+       y = "Value") +
+  theme(legend.position = "none")
+
 
 # correlations
 cor_matrix <- cor(loff_df,lon_df, use = "pairwise.complete.obs")
@@ -47,14 +111,12 @@ round(cor_matrix,2)
 corrplot(cor_matrix,method = "color",        # color in upper
          type = "upper",
          tl.col = "black",        # text color
-         tl.cex = 0.8,
+         tl.cex = 0.7,
          addCoef.col = "black",   # add numbers
          number.cex = 0.7,
          diag = TRUE)
 
-## difference map 
-diff_stack <- loff_r - lon_r
-plot(diff_stack)
+
 
 
 ## correlation per layer
@@ -63,10 +125,11 @@ sapply(1:nlyr(loff_r), function(i)
 )
 
 
-## violon plot
-df <- data.frame(
-  val = c(values(loff_r[[5]]), values(lon_r[[5]])),
-  stack = rep(c("loff", "lon"), each = ncell(loff_r[[1]]))
-)
-ggplot(df, aes(x = stack, y = val, fill = stack)) + geom_violin()
 
+
+## PCA
+combined <- bind_rows(loff_df %>% mutate(source = "df1"),
+                      lon_df %>% mutate(source = "df2"))
+pca <- prcomp(combined %>% select(-source), scale. = TRUE)
+summary(pca)
+autoplot(pca, data = combined, colour = "source", loadings = TRUE, loadings.label = TRUE)
