@@ -14,47 +14,156 @@
 
 
 
-# 01 - file path definitions
-#----------------------------
-
-# define raw data directory
-raw_data_dir <- 'data/raw/'
-
-# define processed data directory
-processed_data_dir <- 'data/processed/'
-
-# define output directory
-output_dir <- 'output/'
+# source setup script
+source('src/setup.R', local = TRUE)
 
 
 
-# 02 - data reading
-#-------------------------------------
+# 01 - data reading
+#-------------------------------------------------------------------------------
 
-# read data frame with inventory plots 
-# and calculated metrics (leaf-on and leaf-off)
-# --> see script forest_metrics.R
-plot_metrics_leafon <- readRDS(
-  file.path(processed_data_dir, 'plot_metrics_leafon.RDS')
+# read data with inventory plots (BI) 
+# and calculated metrics (leaf-on and leaf-off) and extracted tree species
+plot_metrics <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'vol_stp_species_metrics.gpkg')
   )
 
-plot_metrics_leafoff <- readRDS(
-  file.path(processed_data_dir, 'plot_metrics_leafoff.RDS')
+head(plot_metrics)
+str(plot_metrics)
+
+# read extent of the leaf-off dataset
+ext_loff <- sf::st_read(
+  file.path(processed_data_dir, 'pc_leafoff_2024', 'leafoff.vpc')
+  )
+
+# plot data
+ggplot() +
+  geom_sf(data = ext_loff, fill = "grey", alpha = 0.1) +
+  geom_sf(data = plot_metrics, aes(col = vol_ha)) +
+  scale_colour_distiller(palette = "YlGn", direction = 1) +
+  theme_bw() +
+  labs(col = "") +
+  ggtitle("Growing Stock Volume (m³/ha)")
+
+
+
+# 02: data preparation
+#-------------------------------------------------------------------------------
+
+# HERE OR LATER?
+# remove NA (empty plots)
+plot_metrics <- na.omit(plot_metrics)
+
+# split data for leaf-on and leaf-off
+id_cols <- c('key', 'kspnr', 'vol_ha', 'ts')
+
+# select identifier columns + leaf-on metrics
+plot_metrics_lon <- dplyr::select(
+  plot_metrics,
+  dplyr::any_of(id_cols),
+  dplyr::starts_with('lon_')
 )
 
-head(plot_metrics_leafon)
-str(plot_metrics_leafon)
-head(plot_metrics_leafoff)
-str(plot_metrics_leafoff)
+# select identifier columns + leaf-off metrics
+plot_metrics_loff <- dplyr::select(
+  plot_metrics,
+  dplyr::any_of(id_cols),
+  dplyr::starts_with('loff_')
+)
 
+
+# HERE OR BEFORE?
 # remove NA (empty plots)
-plot_metrics_leafon <- na.omit(plot_metrics_leafon)
-plot_metrics_leafoff <- na.omit(plot_metrics_leafoff)
+plot_metrics_lon <- na.omit(plot_metrics_lon)
+plot_metrics_loff <- na.omit(plot_metrics_loff)
 
 
 
 # 03 - model preparation
-#-------------------------------------
+#-------------------------------------------------------------------------------
+
+################################################################################
+#                               NEW - DRAFT                                    #
+
+# split data into training and testing
+set.seed(11)
+
+trainIndex_lon <- caret::createDataPartition(
+  plot_metrics_lon$vol_ha,
+  p = 0.8, list = F)
+
+train_lon <- plot_metrics_lon[trainIndex_lon,]
+test_lon <- plot_metrics_lon[-trainIndex_lon,]
+
+trainIndex_loff <- caret::createDataPartition(
+  plot_metrics_loff$vol_ha,
+  p = 0.8, list = F)
+
+train_loff <- plot_metrics_loff[trainIndex_loff,]
+test_loff <- plot_metrics_loff[-trainIndex_loff,]
+
+saveRDS(
+  train_lon,
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon.RDS')
+  )
+saveRDS(
+  test_lon, 
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon.RDS')
+  )
+saveRDS(
+  train_loff, 
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff.RDS')
+  )
+saveRDS(
+  test_loff,
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff.RDS')
+  )
+
+# df versions
+train_lon_df <- as.data.frame(sf::st_drop_geometry(train_lon))
+test_lon_df <- as.data.frame(sf::st_drop_geometry(test_lon))
+train_loff_df <- as.data.frame(sf::st_drop_geometry(train_loff))
+test_loff_df <- as.data.frame(sf::st_drop_geometry(test_loff))
+
+# random 5-fold cross-validation (cv)
+fold5 <- caret::createFolds(1:nrow(train_lon), k = 5, returnTrain = F)
+
+# explore geographic predictive conditions
+predcond_cv_fold5 <- CAST::geodist(
+  x = train_lon,
+  modeldomain = sf::st_zm(ext_loff),
+  cvfolds = fold5
+  )
+
+predcond_cv_fold5 <- CAST::geodist(
+  x = train_lon,
+  modeldomain = sf::st_zm(ext_loff),
+  cvtrain = trainIndex_lon,
+  testdata = test_lon
+)
+
+# nearest neighbour distance matching (nndm)
+nndm <- CAST::nndm(
+  train_lon,
+  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(train_lon)),
+  samplesize = 1000
+)
+
+# plot ECDF function
+plot(predcond_cv_fold5, stat = 'ecdf')
+plot(nndm, type = 'simple')
+
+
+
+
+################################################################################
+
+
+
+
+
+
+
 
 # split data into training and testing
 plot_metrics_leafon_df <- as.data.frame(plot_metrics_leafon)
