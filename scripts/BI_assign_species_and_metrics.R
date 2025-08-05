@@ -4,7 +4,7 @@ library(terra)
 library(dplyr)
 
 # set working directory 
-setwd(R"{R:/AG_Magdon/datensaetze/solling/dobelmann/}")
+setwd("~")
 
 
 # import data 
@@ -41,5 +41,5 @@ BI_join <- BI %>%
   relocate(geom, .after = last_col() )
 
 # export layer 
-write_sf(BI_join, "vol_stp_species_metrics.gpkg")
+write_sf(BI_join, "./data/vol_stp_species_metrics.gpkg")
 
