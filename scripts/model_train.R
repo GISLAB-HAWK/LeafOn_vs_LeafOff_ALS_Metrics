@@ -77,6 +77,10 @@ plot_metrics_loff <- dplyr::select(
 plot_metrics_lon <- na.omit(plot_metrics_lon)
 plot_metrics_loff <- na.omit(plot_metrics_loff)
 
+# df versions
+plot_metrics_lon_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon))
+plot_metrics_loff_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff))
+
 
 
 # 03 - model preparation
@@ -126,32 +130,132 @@ train_loff_df <- as.data.frame(sf::st_drop_geometry(train_loff))
 test_loff_df <- as.data.frame(sf::st_drop_geometry(test_loff))
 
 # random 5-fold cross-validation (cv)
-fold5 <- caret::createFolds(1:nrow(train_lon), k = 5, returnTrain = F)
+fold5 <- caret::createFolds(1:nrow(plot_metrics_lon), k = 5, returnTrain = F)
 
 # explore geographic predictive conditions
 predcond_cv_fold5 <- CAST::geodist(
-  x = train_lon,
+  x = plot_metrics_lon,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = fold5
   )
 
-predcond_cv_fold5 <- CAST::geodist(
-  x = train_lon,
-  modeldomain = sf::st_zm(ext_loff),
-  cvtrain = trainIndex_lon,
-  testdata = test_lon
+# nearest neighbour distance matching (nndm) 
+# leave-one-out (loo) cv
+nndm <- CAST::nndm(
+  tpoints = plot_metrics_lon,
+  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(plot_metrics_lon)),
+  samplesize = 1000
 )
 
-# nearest neighbour distance matching (nndm)
-nndm <- CAST::nndm(
-  train_lon,
-  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(train_lon)),
+# k nearest neighbour distance matching (knndm)
+knndm <- CAST::knndm(
+  tpoints = plot_metrics_lon,
+  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(plot_metrics_lon)),
+  k = 20,
+  clustering = 'kmeans',
   samplesize = 1000
+)
+
+# create space-time folds
+plot_metrics_lon_df$kspnr <- as.character(plot_metrics_lon_df$kspnr)
+
+indices_llo_cv <- CAST::CreateSpacetimeFolds(
+  x = plot_metrics_lon_df,
+  spacevar = 'kspnr',
+  k = 10
+)
+
+llo_cv <- CAST::geodist(
+  x = plot_metrics_lon,
+  modeldomain = sf::st_zm(ext_loff),
+  cvfolds = indices_llo_cv$indexOut
 )
 
 # plot ECDF function
 plot(predcond_cv_fold5, stat = 'ecdf')
 plot(nndm, type = 'simple')
+plot(llo_cv, stat = 'ecdf')
+
+# fit models and estimate their performance
+# loo cv
+vol_ha_lon_loo_ctrl <- caret::trainControl(method = 'LOOCV', savePredictions = T)
+vol_ha_lon_loo_mod <- caret::train(
+  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
+  plot_metrics_lon_df[,'vol_ha'],
+  method = 'rf',
+  importance = F,
+  trControl = vol_ha_lon_loo_ctrl,
+  ntree = 100,
+  tuneLength = 1
+)
+CAST::global_validation(vol_ha_lon_loo_mod)
+
+# 5-fold cv
+vol_ha_lon_fold5_ctrl <- caret::trainControl(
+  method = 'cv', number = 5, savePredictions = T
+  )
+vol_ha_lon_fold5_mod <- caret::train(
+  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
+  plot_metrics_lon_df[,'vol_ha'],
+  method = 'rf',
+  importance = F,
+  trControl = vol_ha_lon_fold5_ctrl,
+  ntree = 100,
+  tuneLength = 1
+)
+CAST::global_validation(vol_ha_lon_fold5_mod)
+
+# nndm loo cv
+vol_ha_lon_nndm_ctrl <- caret::trainControl(
+  method = 'cv',
+  index = nndm$indx_train,
+  indexOut = nndm$indx_test,
+  savePredictions = T
+)
+vol_ha_lon_nndm_mod <- caret::train(
+  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
+  plot_metrics_lon_df[,'vol_ha'],
+  method = 'rf',
+  importance = F,
+  trControl = vol_ha_lon_nndm_ctrl,
+  ntree = 100,
+  tuneLength = 1
+)
+CAST::global_validation(vol_ha_lon_nndm_mod)
+
+# knndm 20-fold cv
+vol_ha_lon_knndm_ctrl <- caret::trainControl(
+  method = 'cv',
+  index = knndm$indx_train,
+  savePredictions = T
+)
+vol_ha_lon_knndm_mod <- caret::train(
+  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
+  plot_metrics_lon_df[,'vol_ha'],
+  method = 'rf',
+  importance = F,
+  trControl = vol_ha_lon_knndm_ctrl,
+  ntree = 100,
+  tuneLength = 1
+)
+CAST::global_validation(vol_ha_lon_knndm_mod)
+
+# llo cv
+vol_ha_lon_llo_ctrl <- caret::trainControl(
+  method = 'cv',
+  index = indices_llo_cv$index,
+  savePredictions = T
+)
+vol_ha_lon_llo_mod <- caret::train(
+  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
+  plot_metrics_lon_df[,'vol_ha'],
+  method = 'rf',
+  importance = F,
+  trControl = vol_ha_lon_llo_ctrl,
+  ntree = 100,
+  tuneLength = 1
+)
+CAST::global_validation(vol_ha_lon_llo_mod)
 
 
 
