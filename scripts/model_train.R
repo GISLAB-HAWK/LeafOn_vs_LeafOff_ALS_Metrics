@@ -87,101 +87,94 @@ plot_metrics_loff_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff))
 #-------------------------------------------------------------------------------
 
 ################################################################################
-#                               NEW - DRAFT                                    #
-
-# split data into training and testing
-set.seed(11)
-
-trainIndex_lon <- caret::createDataPartition(
-  plot_metrics_lon$vol_ha,
-  p = 0.8, list = F)
-
-train_lon <- plot_metrics_lon[trainIndex_lon,]
-test_lon <- plot_metrics_lon[-trainIndex_lon,]
-
-trainIndex_loff <- caret::createDataPartition(
-  plot_metrics_loff$vol_ha,
-  p = 0.8, list = F)
-
-train_loff <- plot_metrics_loff[trainIndex_loff,]
-test_loff <- plot_metrics_loff[-trainIndex_loff,]
-
-saveRDS(
-  train_lon,
-  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon.RDS')
-  )
-saveRDS(
-  test_lon, 
-  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon.RDS')
-  )
-saveRDS(
-  train_loff, 
-  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff.RDS')
-  )
-saveRDS(
-  test_loff,
-  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff.RDS')
-  )
-
-# df versions
-train_lon_df <- as.data.frame(sf::st_drop_geometry(train_lon))
-test_lon_df <- as.data.frame(sf::st_drop_geometry(test_lon))
-train_loff_df <- as.data.frame(sf::st_drop_geometry(train_loff))
-test_loff_df <- as.data.frame(sf::st_drop_geometry(test_loff))
+#                           START DRAFT - cv testing                           #
 
 # random 5-fold cross-validation (cv)
-fold5 <- caret::createFolds(1:nrow(plot_metrics_lon), k = 5, returnTrain = F)
+fold5 <- caret::createFolds(1:nrow(plot_metrics_loff), k = 5, returnTrain = F)
 
-# explore geographic predictive conditions
 predcond_cv_fold5 <- CAST::geodist(
-  x = plot_metrics_lon,
+  x = plot_metrics_loff,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = fold5
   )
 
+# leave-one-out cv (loocv)
+loo_cv <- caret::createFolds(1:nrow(plot_metrics_loff), k = nrow(plot_metrics_loff), returnTrain = F)
+
+predcond_loo_cv <- CAST::geodist(
+  x = plot_metrics_loff,
+  modeldomain = sf::st_zm(ext_loff),
+  cvfolds = loo_cv
+)
+
 # nearest neighbour distance matching (nndm) 
 # leave-one-out (loo) cv
 nndm <- CAST::nndm(
-  tpoints = plot_metrics_lon,
-  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(plot_metrics_lon)),
+  tpoints = plot_metrics_loff,
+  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(plot_metrics_loff)),
   samplesize = 1000
 )
 
-# k nearest neighbour distance matching (knndm)
-knndm <- CAST::knndm(
-  tpoints = plot_metrics_lon,
-  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(plot_metrics_lon)),
-  k = 20,
-  clustering = 'kmeans',
-  samplesize = 1000
-)
+predcond_cv_nndm <- CAST::geodist(
+  x = plot_metrics_loff,
+  modeldomain = sf::st_zm(ext_loff),
+  cvfolds = nndm$indx_test
+  )
 
-# create space-time folds
-plot_metrics_lon_df$kspnr <- as.character(plot_metrics_lon_df$kspnr)
+# leave-location-out (llo) cv
+# test different k-folds
+k_values <- c(3, 5, 7, 10)
+indices_llo_cv_results <- list()
+
+for(k in k_values) {
+  spatial_folds <- CAST::CreateSpacetimeFolds(
+    x = plot_metrics_loff,
+    spacevar = 'kspnr',
+    k = k,
+    seed = 11
+  )
+  
+  indices_llo_cv_results[[paste0('k', k)]] <- CAST::geodist(
+    x = plot_metrics_loff,
+    modeldomain = sf::st_zm(ext_loff),
+    cvfolds = spatial_folds$indexOut
+  )
+}
+
+sapply(indices_llo_cv_results, function(x) attr(x, 'W_CV'))
+
+plot_metrics_loff$kspnr <- as.character(plot_metrics_loff$kspnr)
 
 indices_llo_cv <- CAST::CreateSpacetimeFolds(
-  x = plot_metrics_lon_df,
+  x = plot_metrics_loff,
   spacevar = 'kspnr',
-  k = 10
+  k = 10,
+  seed = 22
 )
 
-llo_cv <- CAST::geodist(
-  x = plot_metrics_lon,
+predcond_llo_cv <- CAST::geodist(
+  x = plot_metrics_loff,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = indices_llo_cv$indexOut
 )
 
 # plot ECDF function
+plot(predcond_loo_cv, stat = 'ecdf')
 plot(predcond_cv_fold5, stat = 'ecdf')
 plot(nndm, type = 'simple')
-plot(llo_cv, stat = 'ecdf')
+plot(predcond_llo_cv, stat = 'ecdf')
+
+# plot density function
+plot(predcond_cv_fold5) + scale_x_log10(labels = round)
+plot(predcond_cv_nndm) + scale_x_log10(labels = round)
+plot(llo_cv) + scale_x_log10(labels = round)
 
 # fit models and estimate their performance
 # loo cv
 vol_ha_lon_loo_ctrl <- caret::trainControl(method = 'LOOCV', savePredictions = T)
 vol_ha_lon_loo_mod <- caret::train(
-  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
-  plot_metrics_lon_df[,'vol_ha'],
+  plot_metrics_loff_df[,5:length(plot_metrics_loff_df)],
+  plot_metrics_loff_df[,'vol_ha'],
   method = 'rf',
   importance = F,
   trControl = vol_ha_lon_loo_ctrl,
@@ -195,8 +188,8 @@ vol_ha_lon_fold5_ctrl <- caret::trainControl(
   method = 'cv', number = 5, savePredictions = T
   )
 vol_ha_lon_fold5_mod <- caret::train(
-  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
-  plot_metrics_lon_df[,'vol_ha'],
+  plot_metrics_loff_df[,5:length(plot_metrics_loff_df)],
+  plot_metrics_loff_df[,'vol_ha'],
   method = 'rf',
   importance = F,
   trControl = vol_ha_lon_fold5_ctrl,
@@ -213,8 +206,8 @@ vol_ha_lon_nndm_ctrl <- caret::trainControl(
   savePredictions = T
 )
 vol_ha_lon_nndm_mod <- caret::train(
-  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
-  plot_metrics_lon_df[,'vol_ha'],
+  plot_metrics_loff_df[,5:length(plot_metrics_loff_df)],
+  plot_metrics_loff_df[,'vol_ha'],
   method = 'rf',
   importance = F,
   trControl = vol_ha_lon_nndm_ctrl,
@@ -223,23 +216,6 @@ vol_ha_lon_nndm_mod <- caret::train(
 )
 CAST::global_validation(vol_ha_lon_nndm_mod)
 
-# knndm 20-fold cv
-vol_ha_lon_knndm_ctrl <- caret::trainControl(
-  method = 'cv',
-  index = knndm$indx_train,
-  savePredictions = T
-)
-vol_ha_lon_knndm_mod <- caret::train(
-  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
-  plot_metrics_lon_df[,'vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_knndm_ctrl,
-  ntree = 100,
-  tuneLength = 1
-)
-CAST::global_validation(vol_ha_lon_knndm_mod)
-
 # llo cv
 vol_ha_lon_llo_ctrl <- caret::trainControl(
   method = 'cv',
@@ -247,8 +223,8 @@ vol_ha_lon_llo_ctrl <- caret::trainControl(
   savePredictions = T
 )
 vol_ha_lon_llo_mod <- caret::train(
-  plot_metrics_lon_df[,5:length(plot_metrics_lon_df)],
-  plot_metrics_lon_df[,'vol_ha'],
+  plot_metrics_loff_df[,5:length(plot_metrics_loff_df)],
+  plot_metrics_loff_df[,'vol_ha'],
   method = 'rf',
   importance = F,
   trControl = vol_ha_lon_llo_ctrl,
@@ -257,6 +233,169 @@ vol_ha_lon_llo_mod <- caret::train(
 )
 CAST::global_validation(vol_ha_lon_llo_mod)
 
+# table with results
+rbind(
+  data.frame(outcome="GSV", validation="LOO CV",
+             t(as.data.frame(CAST::global_validation(vol_ha_lon_loo_mod)))),
+  data.frame(outcome="GSV", validation="5-fold CV",
+             t(as.data.frame(CAST::global_validation(vol_ha_lon_fold5_mod)))),
+  data.frame(outcome="GSV", validation="NNDM LOO CV",
+             t(as.data.frame(CAST::global_validation(vol_ha_lon_nndm_mod)))),
+  data.frame(outcome="GSV", validation="LLO CV",
+             t(as.data.frame(CAST::global_validation(vol_ha_lon_llo_mod))))
+) |> 
+  knitr::kable(digits=2, row.names = F)
+
+#                           END DRAFT - cv testing                             #
+################################################################################
+################################################################################
+################################################################################
+#                         START DRAFT - model training                         #
+
+# split data into training and testing
+set.seed(11)
+trainIndex_lon <- caret::createDataPartition(
+  plot_metrics_lon$vol_ha,
+  p = 0.8, list = F)
+
+train_lon <- plot_metrics_lon[trainIndex_lon,]
+test_lon <- plot_metrics_lon[-trainIndex_lon,]
+
+set.seed(11)
+trainIndex_loff <- caret::createDataPartition(
+  plot_metrics_loff$vol_ha,
+  p = 0.8, list = F)
+
+train_loff <- plot_metrics_loff[trainIndex_loff,]
+test_loff <- plot_metrics_loff[-trainIndex_loff,]
+
+names(train_lon) <- sub('^lon_', '', names(train_lon))
+names(test_lon) <- sub('^lon_', '', names(test_lon))
+names(train_loff) <- sub('^loff_', '', names(train_loff))
+names(test_loff) <- sub('^loff_', '', names(test_loff))
+
+saveRDS(
+  train_lon,
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon.RDS')
+)
+saveRDS(
+  test_lon, 
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon.RDS')
+)
+saveRDS(
+  train_loff, 
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff.RDS')
+)
+saveRDS(
+  test_loff,
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff.RDS')
+)
+
+# define predictors and response
+predictors_lon <- sf::st_drop_geometry(train_lon[,5:length(train_lon)])
+predictors_loff <- sf::st_drop_geometry(train_loff[,5:length(train_loff)])
+response <- sf::st_drop_geometry(train_lon[,'vol_ha'])
+
+# initialize leave-location-out cross-validation (LLO CV)
+train_lon$kspnr <- as.character(train_lon$kspnr)
+
+indices <- CAST::CreateSpacetimeFolds(
+  train_lon,
+  spacevar = 'kspnr',
+  k = 10,
+  seed = 9999 
+)
+
+# control parameters for the train function
+ctrl <- caret::trainControl(
+  method = 'cv',
+  index = indices$index,
+  savePredictions = T,
+  allowParallel = T
+)
+
+# create grid for tuning features
+tgrid <- expand.grid(
+  mtry = 1:length(predictors_lon),
+  splitrule = c('variance', 'extratrees'),
+  min.node.size = 5
+)
+
+tgrid <- expand.grid(
+  mtry = seq(1,5),
+  splitrule = c('variance', 'extratrees'),
+  min.node.size = c(5,10,15,20)
+)
+
+# create parallel cluster to increase computing speed
+n_cores <- parallel::detectCores() - 2 
+cl <- parallel::makeCluster(n_cores)
+doParallel::registerDoParallel(cl)
+
+# train random forest model
+set.seed(11)
+rf_model_lon <- caret::train(
+  predictors_lon,
+  response$vol_ha,
+  method = 'ranger',
+  trControl = ctrl,
+  tuneGrid = tgrid,
+  num.trees = 100,
+  importance = 'permutation'
+)
+
+set.seed(11)
+rf_model_loff <- caret::train(
+  predictors_loff,
+  response$vol_ha,
+  method = 'ranger',
+  trControl = ctrl,
+  tuneGrid = tgrid,
+  num.trees = 100,
+  importance = 'permutation'
+)
+
+# stop parallel cluster
+parallel::stopCluster(cl)
+
+# get model performance and information
+CAST::global_validation(rf_model_lon)
+CAST::global_validation(rf_model_loff)
+print(rf_model_lon)
+print(rf_model_loff)
+
+# correlation plots for lon and loff predictors
+cor_lon <- stats::cor(predictors_lon, method = 'pearson')
+cor_loff <- stats::cor(predictors_loff, method = 'pearson')
+corrplot::corrplot(cor_lon, method = 'color', type = 'full',
+                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA)
+corrplot::corrplot(cor_loff, method = 'color', type = 'full',
+                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA)
+
+# variable importance
+plot(caret::varImp(rf_model_lon))
+plot(caret::varImp(rf_model_loff))
+
+# train random forest model
+# implementing forward feature selection
+n_cores <- parallel::detectCores() - 2 
+cl <- parallel::makeCluster(n_cores)
+doParallel::registerDoParallel(cl)
+
+ffs_rf_model_lon <- CAST::ffs(
+  predictors_lon,
+  response$vol_ha,
+  method = 'ranger',
+  trControl = ctrl,
+  tuneGrid = tgrid,
+  num.trees = 100,
+  importance = 'permutation',
+  seed = 999
+)
+
+parallel::stopCluster(cl)
+
+ffs_rf_model_lon
 
 
 
