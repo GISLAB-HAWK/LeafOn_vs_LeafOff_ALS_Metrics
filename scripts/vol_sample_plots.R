@@ -148,7 +148,7 @@ head(bi_trees)
 bi_points$hang_rad <- (pi / 180) * bi_points$hang
 
 bi_points_trees <- merge(
-  bi_trees, bi_points[,c("key", "kspnr","hang_rad", "rw", "hw")],
+  bi_trees, bi_points[,c("key", "kspnr", "abt", "hang_rad", "rw", "hw")],
   by = c("key", "kspnr")
   )
 
@@ -339,10 +339,10 @@ bi_points_trees <- bi_points_trees %>%
   dplyr::ungroup()
 
 # extract unique volumes for all sample points
-vol_stp <- unique(bi_points_trees[,c("key", "kspnr", "rw", "hw", "vol_ha")])
+vol_stp <- unique(bi_points_trees[,c("key", "kspnr", "abt", "rw", "hw", "vol_ha")])
 
-vol_stp <- merge(bi_points[,c("key", "kspnr", "rw", "hw")], 
-                 vol_stp, by=c("key", "kspnr", "rw", "hw"), 
+vol_stp <- merge(bi_points[,c("key", "kspnr", "abt", "rw", "hw")], 
+                 vol_stp, by=c("key", "kspnr", "abt", "rw", "hw"), 
                  all.x=T)
 
 vol_stp[is.na(vol_stp)] <- 0
