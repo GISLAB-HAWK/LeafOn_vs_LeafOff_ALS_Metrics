@@ -55,7 +55,7 @@ ggplot() +
 plot_metrics <- na.omit(plot_metrics)
 
 # split data for leaf-on and leaf-off
-id_cols <- c('key', 'kspnr', 'vol_ha', 'ts')
+id_cols <- c('key', 'kspnr', 'abt', 'vol_ha', 'ts')
 
 # select identifier columns + leaf-on metrics
 plot_metrics_lon <- dplyr::select(
@@ -110,13 +110,13 @@ predcond_loo_cv <- CAST::geodist(
 # nearest neighbour distance matching (nndm) 
 # leave-one-out (loo) cv
 nndm <- CAST::nndm(
-  tpoints = plot_metrics_loff,
-  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(plot_metrics_loff)),
+  tpoints = plot_metrics_lon,
+  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(plot_metrics_lon)),
   samplesize = 1000
 )
 
 predcond_cv_nndm <- CAST::geodist(
-  x = plot_metrics_loff,
+  x = plot_metrics_lon,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = nndm$indx_test
   )
@@ -129,7 +129,7 @@ indices_llo_cv_results <- list()
 for(k in k_values) {
   spatial_folds <- CAST::CreateSpacetimeFolds(
     x = plot_metrics_loff,
-    spacevar = 'kspnr',
+    spacevar = 'abt',
     k = k,
     seed = 11
   )
@@ -143,17 +143,17 @@ for(k in k_values) {
 
 sapply(indices_llo_cv_results, function(x) attr(x, 'W_CV'))
 
-plot_metrics_loff$kspnr <- as.character(plot_metrics_loff$kspnr)
+plot_metrics_lon$abt <- as.character(plot_metrics_lon$abt)
 
 indices_llo_cv <- CAST::CreateSpacetimeFolds(
-  x = plot_metrics_loff,
-  spacevar = 'kspnr',
+  x = plot_metrics_lon,
+  spacevar = 'abt',
   k = 10,
   seed = 22
 )
 
 predcond_llo_cv <- CAST::geodist(
-  x = plot_metrics_loff,
+  x = plot_metrics_lon,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = indices_llo_cv$indexOut
 )
@@ -206,8 +206,8 @@ vol_ha_lon_nndm_ctrl <- caret::trainControl(
   savePredictions = T
 )
 vol_ha_lon_nndm_mod <- caret::train(
-  plot_metrics_loff_df[,5:length(plot_metrics_loff_df)],
-  plot_metrics_loff_df[,'vol_ha'],
+  plot_metrics_lon_df[,6:length(plot_metrics_lon_df)],
+  plot_metrics_lon_df[,'vol_ha'],
   method = 'rf',
   importance = F,
   trControl = vol_ha_lon_nndm_ctrl,
@@ -223,8 +223,8 @@ vol_ha_lon_llo_ctrl <- caret::trainControl(
   savePredictions = T
 )
 vol_ha_lon_llo_mod <- caret::train(
-  plot_metrics_loff_df[,5:length(plot_metrics_loff_df)],
-  plot_metrics_loff_df[,'vol_ha'],
+  plot_metrics_lon_df[,6:length(plot_metrics_lon_df)],
+  plot_metrics_lon_df[,'vol_ha'],
   method = 'rf',
   importance = F,
   trControl = vol_ha_lon_llo_ctrl,
@@ -235,10 +235,10 @@ CAST::global_validation(vol_ha_lon_llo_mod)
 
 # table with results
 rbind(
-  data.frame(outcome="GSV", validation="LOO CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_loo_mod)))),
-  data.frame(outcome="GSV", validation="5-fold CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_fold5_mod)))),
+  #data.frame(outcome="GSV", validation="LOO CV",
+  #           t(as.data.frame(CAST::global_validation(vol_ha_lon_loo_mod)))),
+  #data.frame(outcome="GSV", validation="5-fold CV",
+  #           t(as.data.frame(CAST::global_validation(vol_ha_lon_fold5_mod)))),
   data.frame(outcome="GSV", validation="NNDM LOO CV",
              t(as.data.frame(CAST::global_validation(vol_ha_lon_nndm_mod)))),
   data.frame(outcome="GSV", validation="LLO CV",
@@ -296,12 +296,65 @@ predictors_lon <- sf::st_drop_geometry(train_lon[,5:length(train_lon)])
 predictors_loff <- sf::st_drop_geometry(train_loff[,5:length(train_loff)])
 response <- sf::st_drop_geometry(train_lon[,'vol_ha'])
 
+# when including tree species
+# convert to factor
+predictors_lon$ts <- as.factor(predictors_lon$ts)
+predictors_loff$ts <- as.factor(predictors_loff$ts)
+levels(predictors_lon$ts)
+levels(predictors_loff$ts)
+
+# option with grouping into deciduous and coniferous
+# 0,1,2,3 --> coniferous (1)
+# 5,6,7,8 --> deciduous (2)
+# 9 --> other (3)
+# 666 --> canopy cover loss (0)
+train_lon <- train_lon %>%
+  dplyr::mutate(ts_gr = dplyr::case_when(
+    ts %in% c(0, 1, 2, 3) ~ 1,
+    ts %in% c(5, 6, 7, 8) ~ 2,
+    ts == 9 ~ 3,
+    ts == 666 ~ 0,
+  ))
+train_loff <- train_loff %>%
+  dplyr::mutate(ts_gr = dplyr::case_when(
+    ts %in% c(0, 1, 2, 3) ~ 1,
+    ts %in% c(5, 6, 7, 8) ~ 2,
+    ts == 9 ~ 3,
+    ts == 666 ~ 0,
+  ))
+
+predictors_lon <- sf::st_drop_geometry(train_lon[,6:length(train_lon)])
+predictors_loff <- sf::st_drop_geometry(train_loff[,6:length(train_loff)])
+response <- sf::st_drop_geometry(train_lon[,'vol_ha'])
+
+predictors_lon$ts_gr <- as.factor(predictors_lon$ts_gr)
+predictors_loff$ts_gr <- as.factor(predictors_loff$ts_gr)
+levels(predictors_lon$ts_gr)
+levels(predictors_loff$ts_gr)
+
+# initialize nearest neighbour distance matching
+# leave-one-out cross-validation (NNDM LOO CV)
+nndm <- CAST::nndm(
+  tpoints = train_lon,
+  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(train_lon)),
+  samplesize = 1000
+)
+
+# control parameters for the train function
+ctrl <- caret::trainControl(
+  method = 'cv',
+  index = nndm$indx_train,
+  indexOut = nndm$indx_test,
+  savePredictions = T,
+  allowParallel = T
+)
+
 # initialize leave-location-out cross-validation (LLO CV)
-train_lon$kspnr <- as.character(train_lon$kspnr)
+train_lon$abt <- as.character(train_lon$abt)
 
 indices <- CAST::CreateSpacetimeFolds(
   train_lon,
-  spacevar = 'kspnr',
+  spacevar = 'abt',
   k = 10,
   seed = 9999 
 )
