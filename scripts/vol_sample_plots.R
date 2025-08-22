@@ -8,6 +8,8 @@
 #               The final plots with the calculated GSV are clipped to the 
 #               area of interest (AOI), which is the area covered by both
 #               leaf-off and leaf-on airborne laser scanning (ALS) datasets.
+#               Some plots were were remeasured with RTK-GNSS. Where available,
+#               the corrected coordinates of these plots are used.
 # Author:       Christoph Fischer, Georgia Reeves, Florian Franz
 # Contact:      christoph.fischer@nw-fva.de
 #-------------------------------------------------------------------------------
@@ -52,6 +54,9 @@ bi_trees <- bi_trees[
 
 head(bi_points)
 head(bi_trees)
+
+# read remeasured plots (RTK-GNSS)
+bi_plots_rtk <- sf::st_read(file.path(bi_path, 'bi_center_points_rtk.gpkg'))
 
 # read point clouds with LAScatalog
 pc_ctg_loff <- lidR::readLAScatalog(pc_loff_path)
@@ -396,7 +401,57 @@ lidR::plot(pc_ctg_loff, mapview = T,
   mapview::mapview(vol_stp_aoi, col.regions = 'black', cex = 5)
 
 
-# 06: save BI plots with the GSV per sample plot - located in the AOI
+
+# 06: include remeasured RTK-GNSS plots
+#-------------------------------------------------------------------------------
+
+# merge remeasured plots into vol_stp_aoi
+vol_stp_aoi$remeasured <- 'no'
+
+# identify matching plots based on kspnr column
+# note: vol_stp_aoi has "kspnr", bi_plots_rtk has "KSPNR"
+matching_plots <- vol_stp_aoi$kspnr %in% bi_plots_rtk$KSPNR
+
+# mark remeasured plots
+vol_stp_aoi$remeasured[matching_plots] <- 'yes'
+
+# for plots that were remeasured,
+# update their geometry with the more accurate RTK positions
+if (any(matching_plots)) {
+  
+  # create a temporary data frame for merging
+  rtk_temp <- bi_plots_rtk[, c('KSPNR')]
+  rtk_temp$rtk_geometry <- sf::st_geometry(bi_plots_rtk)
+  
+  # merge RTK geometry data
+  vol_stp_aoi_temp <- merge(
+    vol_stp_aoi, 
+    sf::st_drop_geometry(rtk_temp), 
+    by.x = 'kspnr', 
+    by.y = 'KSPNR', 
+    all.x = T
+    )
+  
+  # update geometry for remeasured plots
+  for (i in which(matching_plots)) {
+    kspnr_val <- vol_stp_aoi$kspnr[i]
+    rtk_row <- which(bi_plots_rtk$KSPNR == kspnr_val)
+    if (length(rtk_row) > 0) {
+      sf::st_geometry(vol_stp_aoi)[i] <- sf::st_geometry(bi_plots_rtk)[rtk_row[1]]
+    }
+  }
+  
+  cat('Updated', sum(matching_plots), 'plots with RTK-GNSS coordinates\n')
+  
+} else {
+  
+  cat('No matching plots found between vol_stp_aoi and bi_plots_rtk\n')
+  
+}
+
+
+
+# 07: save BI plots with the GSV per sample plot
 #-------------------------------------------------------------------------------
 
 # rds
