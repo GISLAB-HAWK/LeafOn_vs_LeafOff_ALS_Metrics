@@ -1,13 +1,14 @@
 #-------------------------------------------------------------------------------
 # Name:         model_train.R
-# Description:  Script trains a random forest to model the growing stock (m³/ha).
+# Description:  Script trains random forest models for predicting
+#               growing stock volume (GSV) (m³/ha).
 #               ALS-based metrics previously derived in forest inventory plots
-#               are used as predictors. Two models are trained, one using the
-#               the metrics calculated from leaf-on dataset and one using
-#               the metrics calculated from leaf-off dataset.
+#               (BI plots) are used as predictors. Two models are trained,
+#               one using the the metrics calculated from leaf-on dataset,
+#               and one using the metrics calculated from leaf-off dataset.
 #               Leave-Location-Out cross-validation (LLO CV) is used as a 
 #               spatial cross validation method.
-#               80% of the data is used for training, 20% for testing.
+#               80% of each dataset is used for training the models.
 # Author:       Florian Franz
 # Contact:      florian.franz@nw-fva.de
 #-------------------------------------------------------------------------------
@@ -70,12 +71,6 @@ plot_metrics_loff <- dplyr::select(
   dplyr::any_of(id_cols),
   dplyr::starts_with('loff_')
 )
-
-
-# HERE OR BEFORE?
-# remove NA (empty plots)
-plot_metrics_lon <- na.omit(plot_metrics_lon)
-plot_metrics_loff <- na.omit(plot_metrics_loff)
 
 # df versions
 plot_metrics_lon_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon))
