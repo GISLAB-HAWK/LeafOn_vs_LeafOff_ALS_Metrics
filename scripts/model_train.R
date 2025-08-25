@@ -51,7 +51,6 @@ ggplot() +
 # 02: data preparation
 #-------------------------------------------------------------------------------
 
-# HERE OR LATER?
 # remove NA (empty plots)
 plot_metrics <- na.omit(plot_metrics)
 
@@ -495,6 +494,29 @@ final_pred_loff <- cv_pred_loff %>%
     min.node.size == ffs_rf_model_loff$bestTune$min.node.size) %>%
   dplyr::group_by(rowIndex) %>%
   dplyr::summarise(pred = mean(pred), obs = first(obs), .groups = 'drop')
+
+# link it to the original geometries (BI plots used for training)
+final_pred_lon_sf <- train_lon[final_pred_lon$rowIndex, ] %>%
+  dplyr::select(key, kspnr, abt, ts) %>%
+  dplyr::mutate(
+    pred = final_pred_lon$pred,
+    obs = final_pred_lon$obs,
+  )
+sf::st_write(
+  final_pred_lon_sf,
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_lon.gpkg')
+)
+
+final_pred_loff_sf <- train_loff[final_pred_loff$rowIndex, ] %>%
+  dplyr::select(key, kspnr, abt, ts) %>%
+  dplyr::mutate(
+    pred = final_pred_loff$pred,
+    obs = final_pred_loff$obs
+  )
+sf::st_write(
+  final_pred_loff_sf,
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_loff.gpkg')
+)
 
 # plot predicted vs. observed GSV with CV predictions
 ggplot(final_pred_lon, aes(x=obs, y=pred)) +
