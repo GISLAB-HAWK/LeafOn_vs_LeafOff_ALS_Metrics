@@ -26,8 +26,9 @@ if (!file.exists(paste('data')) |
             (!file.exists(paste('data/processed_data/metrics')) |
              (!file.exists(paste('data/processed_data/train_test_ds')) |
               (!file.exists(paste('data/processed_data/models')) |
-               (!file.exists(paste('data/metadata'))
-                )))))))))))))
+               (!file.exists(paste('data/processed_data/predictions')) |
+                (!file.exists(paste('data/metadata'))
+                ))))))))))))))
   {
   
   dir.create('data')
@@ -42,6 +43,7 @@ if (!file.exists(paste('data')) |
   dir.create('data/processed_data/metrics')
   dir.create('data/processed_data/train_test_ds')
   dir.create('data/processed_data/models')
+  dir.create('data/processed_data/predictions')
   dir.create('data/metadata')
   
 } else {
