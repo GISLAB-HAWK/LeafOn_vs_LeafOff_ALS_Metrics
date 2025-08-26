@@ -26,7 +26,7 @@ source('src/setup.R', local = TRUE)
 # read data with inventory plots (BI) 
 # and calculated metrics (leaf-on and leaf-off) and extracted tree species
 plot_metrics <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'vol_stp_species_metrics.gpkg')
+  file.path(processed_data_dir, 'metrics', 'vol_stp_metrics_rtk.gpkg')
   )
 
 head(plot_metrics)
@@ -497,7 +497,7 @@ final_pred_loff <- cv_pred_loff %>%
 
 # link it to the original geometries (BI plots used for training)
 final_pred_lon_sf <- train_lon[final_pred_lon$rowIndex, ] %>%
-  dplyr::select(key, kspnr, abt, ts) %>%
+  dplyr::select(key, kspnr, abt) %>%
   dplyr::mutate(
     pred = final_pred_lon$pred,
     obs = final_pred_lon$obs,
@@ -508,7 +508,7 @@ sf::st_write(
 )
 
 final_pred_loff_sf <- train_loff[final_pred_loff$rowIndex, ] %>%
-  dplyr::select(key, kspnr, abt, ts) %>%
+  dplyr::select(key, kspnr, abt) %>%
   dplyr::mutate(
     pred = final_pred_loff$pred,
     obs = final_pred_loff$obs
