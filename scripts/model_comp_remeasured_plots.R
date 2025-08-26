@@ -7,6 +7,8 @@
 #               Two models are trained,
 #               one using the the metrics calculated from leaf-on dataset,
 #               and one using the metrics calculated from leaf-off dataset.
+#               Finally, deviations between the RTK and non-RTK plot coordinates
+#               are analyzed.
 # Author:       Florian Franz
 # Contact:      florian.franz@nw-fva.de
 #-------------------------------------------------------------------------------
@@ -96,7 +98,7 @@ predictors_loff <- sf::st_drop_geometry(plot_metrics_loff[,4:length(plot_metrics
 predictors_rtk_loff <- sf::st_drop_geometry(plot_metrics_rtk_loff[,5:length(plot_metrics_rtk_loff)])
 response <- sf::st_drop_geometry(plot_metrics_lon[,'vol_ha'])
 
-# initialize cross validation - using k-fold instead of LOOCV to avoid issues
+# initialize 5-fold cross validation
 ctrl <- caret::trainControl(
   method = 'cv',
   number = 5,
@@ -106,7 +108,9 @@ ctrl <- caret::trainControl(
 
 # create grid for tuning features
 tgrid <- expand.grid(
-  mtry = 1:length(predictors_lon)
+  mtry = 1:length(predictors_lon),
+  splitrule = c('variance', 'extratrees', 'maxstat'),
+  min.node.size = c(5,10,15,20)
 )
 
 
@@ -125,11 +129,11 @@ doParallel::registerDoParallel(cl)
 ffs_rf_model_lon <- CAST::ffs(
   predictors_lon,
   response$vol_ha,
-  method = 'rf',
+  method = 'ranger',
   trControl = ctrl,
- tuneGrid = tgrid,
-  ntree = 100,
-  importance = F,
+  tuneGrid = tgrid,
+  num.trees = 100,
+  importance = 'permutation',
   seed = 999
 )
 
@@ -143,11 +147,11 @@ doParallel::registerDoParallel(cl)
 ffs_rf_model_rtk_lon <- CAST::ffs(
   predictors_rtk_lon,
   response$vol_ha,
-  method = 'rf',
+  method = 'ranger',
   trControl = ctrl,
   tuneGrid = tgrid,
-  ntree = 100,
-  importance = F,
+  num.trees = 100,
+  importance = 'permutation',
   seed = 999
 )
 
@@ -161,11 +165,11 @@ doParallel::registerDoParallel(cl)
 ffs_rf_model_loff <- CAST::ffs(
   predictors_loff,
   response$vol_ha,
-  method = 'rf',
+  method = 'ranger',
   trControl = ctrl,
   tuneGrid = tgrid,
-  ntree = 100,
-  importance = F,
+  num.trees = 100,
+  importance = 'permutation',
   seed = 999
 )
 
@@ -179,11 +183,11 @@ doParallel::registerDoParallel(cl)
 ffs_rf_model_rtk_loff <- CAST::ffs(
   predictors_rtk_loff,
   response$vol_ha,
-  method = 'rf',
+  method = 'ranger',
   trControl = ctrl,
   tuneGrid = tgrid,
-  ntree = 100,
-  importance = F,
+  num.trees = 100,
+  importance = 'permutation',
   seed = 999
 )
 
@@ -201,6 +205,24 @@ rbind(
              t(as.data.frame(CAST::global_validation(ffs_rf_model_rtk_loff))))
 ) |> 
   knitr::kable(digits=2, row.names = F)
+
+# save trained models
+saveRDS(
+  ffs_rf_model_lon,
+  file.path(processed_data_dir, 'models' , 'ffs_rf_model_no_rtk_leafon.RDS')
+)
+saveRDS(
+  ffs_rf_model_rtk_lon,
+  file.path(processed_data_dir, 'models', 'ffs_rf_model_rtk_leafon.RDS')
+)
+saveRDS(
+  ffs_rf_model_loff,
+  file.path(processed_data_dir, 'models' , 'ffs_rf_model_no_rtk_leafoff.RDS')
+)
+saveRDS(
+  ffs_rf_model_rtk_loff,
+  file.path(processed_data_dir, 'models', 'ffs_rf_model_rtk_leafoff.RDS')
+)
 
 
 
