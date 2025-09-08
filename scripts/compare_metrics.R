@@ -9,8 +9,9 @@ library(ggfortify)
 
 
 # path to indices files 
-loff_file <- "R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/03_indices/loff24_indices/data/solling24_leafoff_indices__0_0___.tiff"
-lon_file <-  "R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/solling23_leafon_indices/data/solling23_leafon_indices__0_0___.tiff"
+loff_file <- "R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/03_indices/loff24__indices/data/solling24_leafoff_indices__0_0___.tiff"
+lon_file <-  "R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/03_indices/lon23_indices/data/solling23_leafon_indices__0_0___.tiff"
+
 
 # read raster files 
 loff_r <- rast(loff_file)
@@ -49,6 +50,15 @@ lon_df$season <- "leaf on"
 loff_df$season<- "leaf off"
 
 
+# Combine and pivot to long format
+df_long <- bind_rows(lon_df, loff_df) %>%    
+  pivot_longer(
+    cols = -season,
+    names_to = "variable",
+    values_to = "value"
+  )
+
+
 # Pivot data wider: one row per variable
 df_wide <- df_long %>%
   pivot_wider(names_from = season, values_from = value)%>%
@@ -65,17 +75,6 @@ ggplot(df_wide, aes(x = leaf_on, y = leaf_off)) +
     title = "Leaf-On vs Leaf-Off Comparison per Variable",
     x = "Leaf-On Value",
     y = "Leaf-Off Value"
-  )
-
-
-
-
-# Combine and pivot to long format
-df_long <- bind_rows(lon_df, loff_df) %>%    
-  pivot_longer(
-    cols = -season,
-    names_to = "variable",
-    values_to = "value"
   )
 
 
