@@ -8,10 +8,11 @@ library(ggplot2)
 library(ggfortify)
 library(ggpubr)
 
+setwd("C:/Users/sdobelma/Documents/LeafOn_vs_LeafOff_ALS/")
 
 # files paths 
-loff_df_file <- "R:/AG_Magdon/datensaetze/solling/dobelmann/BI_indices_2024.csv"
-lon_df_file <-  "R:/AG_Magdon/datensaetze/solling/dobelmann/BI_indices_2023.csv"
+loff_df_file <- "data/BI_indices_2024_RTK.csv"
+lon_df_file <-  "data/BI_indices_2023_RTK.csv"
 
 
 # read the data 
@@ -54,7 +55,7 @@ t_test <- df_wide %>%
 print(t_test)
 
 ## scatterplot 
-ggplot(df_wide, aes(x = leaf_on, y = leaf_off)) +
+s <- ggplot(df_wide, aes(x = leaf_on, y = leaf_off)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
   facet_wrap(~ variable, scales = "free") +
@@ -69,24 +70,33 @@ ggplot(df_wide, aes(x = leaf_on, y = leaf_off)) +
   )
 
 
+ggsave("plots/BI_scatterplot.png",s,  dpi = 500, width = 12, height = 10)
+
+
 ## violon plot
-ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
+v <- ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
   geom_violin(trim = FALSE) +
-  facet_wrap(~ variable, nrow = 4, ncol = 4, scales = "free_y") +
+  facet_wrap(~ variable, nrow = 4, ncol = 5, scales = "free_y") +
   theme_minimal() +
   labs(title = "Metric Comparison Leaf off vs. leaf on",
        x = "",
        y = "Value") +
   theme(legend.position = "none")
 
+ggsave("plots/BI_violinplot.png", v ,  dpi = 500, width = 12, height = 10)
+
 
 ## density plot
-ggplot(df_long, aes(x = value, fill = season)) +
+d <- ggplot(df_long, aes(x = value, fill = season)) +
   geom_density(alpha = 0.5) +
-  facet_wrap(~ variable, scales = "free", ncol = 4) +
+  facet_wrap(~ variable, scales = "free", ncol = 5) +
   theme_minimal() +
   labs(title = "Metric Comparison Leaf off vs. leaf on",
        x = "",
        y = "Value") +
   theme(legend.position = "bottom")
+
+d
+
+ggsave("plots/BI_densityplot.png", d ,  dpi = 500, width = 12, height = 10)
 
