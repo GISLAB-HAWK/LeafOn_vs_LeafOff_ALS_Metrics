@@ -1,12 +1,14 @@
 #-------------------------------------------------------------------------------
 # Name:         vol_sample_plots.R
-# Description:  Calculation of timber volume per ha in forest inventory plots
+# Description:  Calculation of forest attributes in inventory plots
 #               (Betriebsionventur (BI) Lower Saxony).
 #               Inventory data is first pre-processed and then single tree volumes
 #               are calculated. These tree volumes are aggregated per sample plot
-#               to obtain the growing stock volume (GSV) [m³/ha].
-#               The final plots with the calculated GSV are clipped to the 
-#               area of interest (AOI), which is the area covered by both
+#               to obtain the growing stock volume (GSV) [m³/ha]. Other attributes
+#               which are calculated per sample plot include tree density [n/ha], 
+#               basal area [m³/ha], and quadratic mean diameter (QMD) [cm].
+#               The final plots with the calculated forest attributes are clipped
+#               to the area of interest (AOI), which is the area covered by both
 #               leaf-off and leaf-on airborne laser scanning (ALS) datasets.
 #               Some plots were were remeasured with RTK-GNSS. Where available,
 #               the corrected coordinates of these plots are used.
@@ -337,14 +339,39 @@ plot(bi_points_trees$bhd, bi_points_trees$vol)
 # 04: aggregate volume per sample plot
 #-------------------------------------------------------------------------------
 
-# group sums of volume
+# add column of leaf type
+unique(bi_points_trees$bagr)
+bi_points_trees$leaf_type <- ifelse(
+  bi_points_trees$bagr %in% c('EI', 'ALN', 'BU', 'ALH'),
+  'deciduous',
+  'coniferous'
+)
+
+# group sums of volume, tree density, basal area, and QMD
+# assign dominant leaf type to each plot
 bi_points_trees <- bi_points_trees %>%
   dplyr::group_by(key, kspnr) %>%
-  dplyr::mutate(vol_ha = sum(vol * nha)) %>%
+  dplyr::mutate(
+    vol_ha = sum(vol * nha),
+    tree_density = mean(nha),
+    basal_area_tree = (pi / 4) * (bhd / 100)^2,
+    basal_area_ha = sum(basal_area_tree * nha, na.rm = T),
+    dg = sqrt(sum(bhd^2 * nha, na.rm = T) / sum(nha, na.rm = T)),
+    total_deciduous = sum(dplyr::if_else(
+      leaf_type == 'deciduous', nha, 0, missing = 0), na.rm = T),
+    total_coniferous = sum(dplyr::if_else(
+      leaf_type == 'coniferous', nha, 0, missing = 0), na.rm = T),
+    dominant_leaf_type = dplyr::case_when(
+      total_deciduous > total_coniferous ~ 'deciduous',
+      total_coniferous > total_deciduous ~ 'coniferous',
+      TRUE                               ~ 'tie'
+    )) %>%
   dplyr::ungroup()
 
-# extract unique volumes for all sample points
-vol_stp <- unique(bi_points_trees[,c("key", "kspnr", "abt", "rw", "hw", "vol_ha")])
+# extract unique forest inventory variables for all sample plots
+vol_stp <- unique(
+  bi_points_trees[,c("key", "kspnr", "abt", "rw", "hw", "vol_ha", "tree_density",
+                     "basal_area_ha", "dg", "dominant_leaf_type")])
 
 vol_stp <- merge(bi_points[,c("key", "kspnr", "abt", "rw", "hw")], 
                  vol_stp, by=c("key", "kspnr", "abt", "rw", "hw"), 
@@ -355,7 +382,9 @@ vol_stp[is.na(vol_stp)] <- 0
 head(vol_stp)
 summary(vol_stp)
 boxplot(vol_stp$vol_ha)
-
+boxplot(vol_stp$tree_density)
+boxplot(vol_stp$basal_area_ha)
+boxplot(vol_stp$dg)
 
 
 # 05: clip sample plots to the AOI
@@ -383,9 +412,13 @@ vol_stp_aoi <- sf::st_intersection(vol_stp_utm, sf::st_as_sf(pc_ctg_loff))
 original_cols <- names(vol_stp_utm)
 vol_stp_aoi <- vol_stp_aoi[, original_cols]
 
-summary(vol_stp_aoi$vol_ha)
-par(mfrow = c(1,1))
+summary(vol_stp_aoi)
+table(vol_stp_aoi$dominant_leaf_type)
+par(mfrow = c(2,2))
 boxplot(vol_stp_aoi$vol_ha)
+boxplot(vol_stp_aoi$tree_density)
+boxplot(vol_stp_aoi$basal_area_ha)
+boxplot(vol_stp_aoi$dg)
 
 # visualize locations of the BI plots
 lidR::plot(pc_ctg_lon, mapview = T, 
