@@ -12,6 +12,9 @@
 #               leaf-off and leaf-on airborne laser scanning (ALS) datasets.
 #               Some plots were were remeasured with RTK-GNSS. Where available,
 #               the corrected coordinates of these plots are used.
+#               Plots with a defined vegetation height change between leaf-on 
+#               and leaf-off that cannot be attributed to seasonal differences,
+#               but rather to treefall (harvest, natural disturbance), are removed.
 # Author:       Christoph Fischer, Georgia Reeves, Florian Franz
 # Contact:      christoph.fischer@nw-fva.de
 #-------------------------------------------------------------------------------
@@ -481,6 +484,58 @@ if (any(matching_plots)) {
   cat('No matching plots found between vol_stp_aoi and bi_plots_rtk\n')
   
 }
+
+
+
+# 07: remove plots based on height differences between leaf-off and leaf-on
+#-------------------------------------------------------------------------------
+
+extract_plot_heights_chm <- function(catalog, plots, res = 0.5, buffer_radius = 13) {
+  
+  # create buffered plots
+  plots_buffered <- sf::st_buffer(plots, dist = buffer_radius)
+  
+  # generate CHM for the area containing all plots
+  chm_opt <- list(res = res, algorithm = lidR::p2r())
+  chm <- lidR::rasterize_canopy(catalog, chm_opt$res, chm_opt$algorithm)
+  
+  # extract mean height within each plot
+  plot_heights <- exactextractr::exact_extract(
+    chm,
+    plots_buffered,
+    fun = 'mean'
+  )
+  
+  # convert list to vector
+  if (is.list(plot_heights)) {
+    plot_heights <- unlist(plot_heights)
+  }
+  
+  return(plot_heights)
+}
+
+# extract heights from CHMs of both point cloud catalogs
+cat('Extracting heights from leaf-off point cloud...\n')
+heights_loff <- extract_plot_heights_chm(pc_ctg_loff, vol_stp_aoi)
+
+cat("Extracting heights from leaf-on point cloud...\n") 
+heights_lon <- extract_plot_heights_chm(pc_ctg_lon, vol_stp_aoi)
+
+# add heights to plots
+vol_stp_aoi$height_loff <- heights_loff
+vol_stp_aoi$height_lon <- heights_lon
+
+# calculate height difference (leaf-off - leaf-on)
+vol_stp_aoi$height_diff <- vol_stp_aoi$height_loff - vol_stp_aoi$height_lon
+
+# create filter based on height difference threshold
+height_diff_threshold <- -10  
+valid_plots <- is.na(vol_stp_aoi$height_diff) |
+  vol_stp_aoi$height_diff > height_diff_threshold
+table(valid_plots)
+
+# remove corresponding plots
+vol_stp_aoi_filtered <- vol_stp_aoi[valid_plots, ]
 
 
 
