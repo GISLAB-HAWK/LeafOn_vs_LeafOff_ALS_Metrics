@@ -15,41 +15,144 @@
 
 
 
-# 01 - file path definitions
-#----------------------------
-
-# define raw data directory
-raw_data_dir <- 'data/raw/'
-
-# define processed data directory
-processed_data_dir <- 'data/processed/'
-
-# define output directory
-output_dir <- 'output/'
+# source setup script
+source('src/setup.R', local = TRUE)
 
 
+# 01 - data reading
+#-------------------------------------------------------------------------------
 
-# 02 - data reading
+# input paths
+metrics_path <- file.path(processed_data_dir, 'metrics')
+
+# read w2w metrics (leaf- on & leaf-off)
+metrics_w2w_leafon <- terra::rast(
+  file.path(metrics_path, 'Solling23_leafon_indices_harm.tiff')
+)
+
+metrics_w2w_leafoff <- terra::rast(
+  file.path(metrics_path, 'Solling24_leafoff_indices_harm.tiff')
+)
+
+metrics_w2w_leafon
+metrics_w2w_leafoff
+metrics_w2w_leafon@pntr$names
+metrics_w2w_leafoff@pntr$names
+
+
+
+# 02 - wall-to-wall modeling
 #-------------------------------------
 
-# input path to point clouds
-path_pc_leafoff <- file.path(raw_data_dir, 'pc_LeafOff_2024')
-path_pc_leafon <- file.path(raw_data_dir, 'pc_LeafOn_2023')
+# path to the models
+model_path <- file.path(processed_data_dir, 'models')
 
-# read point clouds with LAScatalog
-pc_ctg_leafoff <- lidR::readLAScatalog(path_pc_leafoff)
-pc_ctg_leafon <- lidR::readLAScatalog(path_pc_leafon)
+# output path for the predictions
+vol_ha_pred_path <- file.path(processed_data_dir, 'predictions')
 
-pc_ctg_leafoff
-pc_ctg_leafon
+# leaf-on model --> predicted on leaf-on data
+if (!file.exists(file.path(vol_ha_pred_path, 'vol_ha_pred_leafon.tif'))) {
+  
+  # deciduous model
+  if (metrics_w2w_leafon$band1 == 1) {
+    
+    # read leaf-on deciduous model
+    rf_model_lon_decid <- readRDS(
+      file.path(model_path, 'ffs_rf_model_leafon_deciduous_filtered')
+      )
+    
+    # predict for deciduous dominated pixels
+    vol_ha_pred_leafon <- terra::predict(
+      metrics_w2w_leafon,
+      rf_model_lon_decid,
+      na.rm = T
+    )
+  
+  # coniferous model
+  } else {
+      
+    # read leaf-on coniferous model
+    rf_model_lon_conif <- readRDS(
+      file.path(model_path, 'ffs_rf_model_leafon_coniferous_filtered')
+    )
+    
+    # predict for coniferous dominated pixels
+    vol_ha_pred_leafon <- terra::predict(
+      metrics_w2w_leafon,
+      rf_model_lon_conif,
+      na.rm = T
+    )
+  }
+}
+  
+### workaround because of different variable names ###
+# Get the current names
+current_names <- names(metrics_w2w_leafon)
+# Remove "lon_" prefix if it exists
+new_names <- gsub("^lon_", "", current_names)
+# Rename the raster bands
+names(metrics_w2w_leafon) <- new_names
+###
 
-# assign CRS from pc_ctg_leafoff to pc_ctg_leafon
-# ETRS89 / UTM zone 32N
-lidR::crs(pc_ctg_leafon) <- lidR::crs(pc_ctg_leafoff)
+
+
+# leaf-on model --> predicted on leaf-on data
+if (!file.exists(file.path(vol_ha_pred_path, 'vol_ha_pred_leafon.tif'))) {
+  
+  # read deciduous and coniferous models
+  rf_model_lon_decid <- readRDS(
+    file.path(model_path, 'ffs_rf_model_leafon_deciduous_filtered.RDS')
+  )
+  
+  rf_model_lon_conif <- readRDS(
+    file.path(model_path, 'ffs_rf_model_leafon_coniferous_filtered.RDS')
+  )
+  
+  # create masks for deciduous and coniferous pixels
+  deciduous_mask <- metrics_w2w_leafon$band1 == 1
+  coniferous_mask <- metrics_w2w_leafon$band1 != 1
+  
+  # predict for deciduous pixels
+  vol_ha_pred_lon_decid <- terra::predict(
+    metrics_w2w_leafon,
+    rf_model_lon_decid,
+    na.rm = T
+  )
+  
+  # predict for coniferous pixels
+  vol_ha_pred_lon_conif <- terra::predict(
+    metrics_w2w_leafon,
+    rf_model_lon_conif,
+    na.rm = T
+  )
+  
+  # combine predictions based on tree species
+  vol_ha_pred_lon <- terra::ifel(
+    deciduous_mask,
+    vol_ha_pred_lon_decid,
+    vol_ha_pred_lon_conif
+  )
+  
+  # clean up temporary rasters
+  rm(vol_ha_pred_lon_decid, vol_ha_pred_lon_conif, deciduous_mask, coniferous_mask)
+  
+}
 
 
 
-# 03 - wall-to-wall modeling
+
+
+
+
+
+
+
+
+
+
+
+
+# 02 - wall-to-wall modeling
 #-------------------------------------
 
 # 1. calculate forest metrics for the entire collection of files
