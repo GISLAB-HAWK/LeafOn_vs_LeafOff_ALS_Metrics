@@ -29,7 +29,7 @@ source('src/setup.R', local = TRUE)
 # read data with inventory plots (BI) 
 # and calculated metrics (leaf-on and leaf-off) and extracted tree species
 plot_metrics <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'vol_stp_metrics_rtk.gpkg')
+  file.path(processed_data_dir, 'metrics', 'vol_stp_filtered_metrics.gpkg')
   )
 
 head(plot_metrics)
@@ -295,13 +295,22 @@ names(test_lon_deciduous) <- sub('^lon_', '', names(test_lon_deciduous))
 names(train_loff_deciduous) <- sub('^loff_', '', names(train_loff_deciduous))
 names(test_loff_deciduous) <- sub('^loff_', '', names(test_loff_deciduous))
 
-set.seed(11)
-trainIndex_lon_deciduous <- caret::createDataPartition(
-  plots_lon_deciduous$vol_ha,
-  p = 0.8, list = F)
-
-train_lon_deciduous <- plots_lon_deciduous[trainIndex_lon_deciduous,]
-test_lon_deciduous <- plots_lon_deciduous[-trainIndex_lon_deciduous,]
+saveRDS(
+  train_lon_deciduous,
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon_deciduous_filtered.RDS')
+)
+saveRDS(
+  test_lon_deciduous, 
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon_deciduous_filtered.RDS')
+)
+saveRDS(
+  train_loff_deciduous, 
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff_deciduous_filtered.RDS')
+)
+saveRDS(
+  test_loff_deciduous,
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff_deciduous_filtered.RDS')
+)
 
 # coniferous
 set.seed(11)
@@ -327,19 +336,19 @@ names(test_loff_coniferous) <- sub('^loff_', '', names(test_loff_coniferous))
 
 saveRDS(
   train_lon_coniferous,
-  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon_coniferous.RDS')
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon_coniferous_filtered.RDS')
 )
 saveRDS(
   test_lon_coniferous, 
-  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon_coniferous.RDS')
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon_coniferous_filtered.RDS')
 )
 saveRDS(
   train_loff_coniferous, 
-  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff_coniferous.RDS')
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff_coniferous_filtered.RDS')
 )
 saveRDS(
   test_loff_coniferous,
-  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff_coniferous.RDS')
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff_coniferous_filtered.RDS')
 )
 
 # define predictors and response
@@ -538,11 +547,11 @@ parallel::stopCluster(cl)
 # save trained models
 saveRDS(
   ffs_rf_model_lon_deciduous,
-  file.path(processed_data_dir, 'models' , 'ffs_rf_model_leafon_deciduous.RDS')
+  file.path(processed_data_dir, 'models' , 'ffs_rf_model_leafon_deciduous_filtered.RDS')
   )
 saveRDS(
   ffs_rf_model_loff_deciduous,
-  file.path(processed_data_dir, 'models', 'ffs_rf_model_leafoff_deciduous.RDS')
+  file.path(processed_data_dir, 'models', 'ffs_rf_model_leafoff_deciduous_filtered.RDS')
   )
 
 # coniferous
@@ -583,11 +592,11 @@ parallel::stopCluster(cl)
 # save trained models
 saveRDS(
   ffs_rf_model_lon_coniferous,
-  file.path(processed_data_dir, 'models' , 'ffs_rf_model_leafon_coniferous.RDS')
+  file.path(processed_data_dir, 'models' , 'ffs_rf_model_leafon_coniferous_filtered.RDS')
 )
 saveRDS(
   ffs_rf_model_loff_coniferous,
-  file.path(processed_data_dir, 'models', 'ffs_rf_model_leafoff_coniferous.RDS')
+  file.path(processed_data_dir, 'models', 'ffs_rf_model_leafoff_coniferous_filtered.RDS')
 )
 
 # get model performance and information
@@ -640,7 +649,7 @@ final_pred_lon_deciduous_sf <- train_lon_deciduous[final_pred_lon_deciduous$rowI
   )
 sf::st_write(
   final_pred_lon_deciduous_sf,
-  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_lon_deciduous.gpkg')
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_lon_deciduous_filtered.gpkg')
 )
 
 final_pred_loff_deciduous_sf <- train_loff_deciduous[final_pred_loff_deciduous$rowIndex, ] %>%
@@ -651,7 +660,7 @@ final_pred_loff_deciduous_sf <- train_loff_deciduous[final_pred_loff_deciduous$r
   )
 sf::st_write(
   final_pred_loff_deciduous_sf,
-  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_loff_deciduous.gpkg')
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_loff_deciduous_filtered.gpkg')
 )
 
 # coniferous
@@ -680,7 +689,7 @@ final_pred_lon_coniferous_sf <- train_lon_coniferous[final_pred_lon_coniferous$r
   )
 sf::st_write(
   final_pred_lon_coniferous_sf,
-  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_lon_coniferous.gpkg')
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_lon_coniferous_filtered.gpkg')
 )
 
 final_pred_loff_coniferous_sf <- train_loff_coniferous[final_pred_loff_coniferous$rowIndex, ] %>%
@@ -691,7 +700,7 @@ final_pred_loff_coniferous_sf <- train_loff_coniferous[final_pred_loff_coniferou
   )
 sf::st_write(
   final_pred_loff_coniferous_sf,
-  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_loff_coniferous.gpkg')
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_loff_coniferous_filtered.gpkg')
 )
 
 # plot predicted vs. observed GSV with CV predictions
@@ -752,7 +761,7 @@ ggplot(final_pred_lon_loff_deciduous, aes(x = obs, y = pred, color = condition))
   coord_fixed(ratio = 1) +
   scale_x_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
   scale_y_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
-  scale_color_manual(values = c('leaf-on' = 'gray30', 'leaf-off' = 'gray60'),
+  scale_color_manual(values = c('leaf-on' = 'gray60', 'leaf-off' = 'gray30'),
                      name = 'Condition') +
   geom_abline(slope = 1, intercept = 0, linewidth = 1, color = 'red') +
   annotate('text', x = 475, y = 10, label = text_labels_deciduous, 
@@ -814,7 +823,7 @@ ggplot(final_pred_lon_loff_coniferous, aes(x = obs, y = pred, color = condition)
   coord_fixed(ratio = 1) +
   scale_x_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
   scale_y_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
-  scale_color_manual(values = c('leaf-on' = 'gray30', 'leaf-off' = 'gray60'),
+  scale_color_manual(values = c('leaf-on' = 'gray60', 'leaf-off' = 'gray30'),
                      name = 'Condition') +
   geom_abline(slope = 1, intercept = 0, linewidth = 1, color = 'red') +
   annotate('text', x = 475, y = 10, label = text_labels_coniferous, 
