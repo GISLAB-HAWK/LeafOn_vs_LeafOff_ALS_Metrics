@@ -4,42 +4,25 @@ library(terra)
 library(dplyr)
 
 # set working directory 
-setwd("R:/AG_Magdon/datensaetze/solling/dobelmann")
+setwd("C:/Users/sdobelma/Documents/LeafOn_vs_LeafOff_ALS/")
 
 
 # import data 
-BI <- read_sf("vol_stp_incl_rtk_plots.gpkg") # Betriebsinventur Punkte 
-#ts <- rast("treespecies_de_2022.tif") # Tree Species Data 
+BI <- read_sf("data/vol_stp_filtered.gpkg") # Betriebsinventur Punkte 
 
-ind23 <- read.csv("BI_indices_2023_RTK.csv") # Indices for BI points 
-ind24 <- read.csv("BI_indices_2024_RTK.csv")
+ind23 <- read.csv("data/BI_indices_2023_RTK_harm.csv") # Indices for BI points 
+ind24 <- read.csv("data/BI_indices_2024_RTK_harm.csv")
 
 names(ind23) <- c("kspnr", paste0("lon_", names(ind23)[-1])) # rename layer 
 names(ind24) <- c("kspnr", paste0("loff_", names(ind24)[-1]))
 
-
-# extract tree species for BI points 
-#crs(BI) == crs(ts) # check crs
-#BI_prj <- st_transform(BI, crs(ts)) # reproject BI points to mask them first 
-
-#ts_crop <- crop(ts, BI_prj) # crop to extent of BI points 
-#ts_utm <- project(ts_crop, crs(BI), method = "near") # reproject to EPSG:25832
-
-#dummy <- rast(extent = ext(ts_utm), resolution = 20, crs = crs(BI)) # create dummy raster with target resolution
-#ts_res <- resample(ts_utm,dummy, method = "near") # resample tree species to 20m 
-#writeRaster(ts_res, "treespecies_de_2022_reprojected_resampled.tif")
-
-#BI_ts <- extract(ts_res,BI) # extract tree species per point
-
-
 # combine all the information together in one layer 
 BI_join <- BI %>% 
-  #mutate(ts = BI_ts[,2]) %>%
   mutate(kspnr = as.integer(kspnr)) %>% 
   left_join(ind23, by = "kspnr") %>% 
   left_join(ind24, by = "kspnr") %>%
   relocate(geom, .after = last_col() )
 
 # export layer 
-write_sf(BI_join, "./vol_stp_metrics_rtk.gpkg")
+write_sf(BI_join, "data/vol_stp_filtered_metrics.gpkg")
 

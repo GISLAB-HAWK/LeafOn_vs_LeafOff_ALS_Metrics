@@ -7,15 +7,19 @@ library(corrplot)
 library(ggplot2)
 library(ggfortify)
 
+setwd("R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/03_indices/")
 
 # path to indices files 
-loff_file <- "R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/03_indices/loff24__indices/data/solling24_leafoff_indices__0_0___.tiff"
-lon_file <-  "R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/03_indices/lon23_indices/data/solling23_leafon_indices__0_0___.tiff"
+loff_file <- "solling24_leafoff_indices_harm.tiff"
+lon_file <-  "solling23_leafon_indices_harm.tiff"
 
 
 # read raster files 
-loff_r <- rast(loff_file)
-lon_r <- rast(lon_file)
+loff_r <- rast(loff_file)[[-1]]
+lon_r <- rast(lon_file)[[-1]]
+
+plot(lon_r)
+plot(loff_r)
 
 # crop to same extent 
 lon_r <- crop(lon_r, loff_r)
@@ -32,36 +36,101 @@ par(mfrow = c(1,2))
 plot(loff_r[[3]])
 plot(lon_r[[3]])
 
+diff <- loff_r$BE_H_MAX - lon_r$BE_H_MAX
+
+mask <- diff > -10
+
+# mask the two layer 
+loff_r <- mask(loff_r, mask, maskvalue = FALSE)
+lon_r <- mask(lon_r, mask, maskvalue = FALSE)
+
+plot(lon_r[[2]])
 
 # extract data
 lon_df <- as.data.frame(lon_r, na.rm = T)
 loff_df <- as.data.frame(loff_r, na.rm = T)
 
-## unpaired t-test
-map_dfr(names(lon_df), function(var) {
-  data.frame(
-    variable = var,
-    p_value = t.test(lon_df[[var]], loff_df[[var]])$p.value
-  )
-})
+df_long <- bind_rows(
+  lon_df  %>% mutate(season = "leaf on"),
+  loff_df %>% mutate(season = "leaf off")
+) %>%
+  pivot_longer(cols = -c(season), names_to = "variable", values_to = "value")
 
+# summarize the data
+df_summary <- df_long %>%
+  group_by(season, variable) %>%
+  summarise(mean = mean(value), sd = sd(value))
 
-lon_df$season <- "leaf on"
-loff_df$season<- "leaf off"
+df_summary
 
-
-# Combine and pivot to long format
-df_long <- bind_rows(lon_df, loff_df) %>%    
-  pivot_longer(
-    cols = -season,
-    names_to = "variable",
-    values_to = "value"
-  )
-
-
-# Pivot data wider: one row per variable
+# Pivot wide
 df_wide <- df_long %>%
   pivot_wider(names_from = season, values_from = value)%>%
+  rename(leaf_on = `leaf on`,
+         leaf_off = `leaf off`)
+
+#### paired t.test ####
+# using a subsample of 5000
+set.seed(42)
+df_sub <- df_long %>% dplyr::sample_n(5000) 
+
+# test for normal distribution 
+set.seed(42)  # for reproducibility
+
+shapiro <- df_sub %>%
+  group_by(season, variable) %>%
+  summarise(
+    shapiro = list(shapiro.test(value)), # using a subsample n = 5000
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(
+    statistic = shapiro$statistic,
+    p.value   = shapiro$p.value,
+    method    = shapiro$method
+  ) %>%
+  select(-shapiro)
+
+shapiro
+
+any(shapiro$p.value>0.05)
+which(shapiro$p.value>0.05)
+
+
+# data not normally distribute. using non-parametric wilcoxon-test instead
+
+wilcox_test <- df_sub %>%
+  group_by(variable) %>%
+  summarise(
+    test = list(
+      wilcox.test(value ~ season, data = cur_data())
+    ),
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(
+    statistic = test$statistic,
+    p.value   = test$p.value,
+    method    = test$method
+  ) %>%
+  select(-test)
+
+print(wilcox_test)
+
+any(wilcox_test$p.value< 0.05)
+which(wilcox_test$p.value< 0.05)
+
+# Pivot data wider: one row per variable
+
+df_wide <- df_sub %>%
+  group_by(variable, season) %>%
+  mutate(pixel_id = row_number()) %>%   # per-variable pixel index
+  ungroup() %>%
+  pivot_wider(
+    names_from  = season,
+    values_from = value
+  ) %>%
+  arrange(variable, pixel_id) %>%
   rename(leaf_on = `leaf on`,
          leaf_off = `leaf off`)
 
@@ -78,15 +147,15 @@ ggplot(df_wide, aes(x = leaf_on, y = leaf_off)) +
   )
 
 
-df_summary <- df_long %>%
+df_summary <- df_sub %>%
   group_by(season, variable) %>%
   summarise(mean = mean(value), sd = sd(value))
 
 ## violon plot
 
-ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
+ggplot(df_sub, aes(x = season, y = value, fill = season, alpha = 0.85)) +
   geom_violin(trim = FALSE) +
-  facet_wrap(~ variable, nrow = 3, ncol = 4, scales = "free_y") +
+  facet_wrap(~ variable, nrow = 5, ncol = 4, scales = "free_y") +
   theme_minimal() +
   labs(title = "Metric Comparison Leaf off vs. leaf on",
        x = "",
@@ -94,7 +163,7 @@ ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
   theme(legend.position = "none")
 
 ## density plot
-ggplot(df_long, aes(x = value, fill = season)) +
+ggplot(df_sub, aes(x = value, fill = season)) +
   geom_density(alpha = 0.5) +
   facet_wrap(~ variable, scales = "free", ncol = 4) +
   theme_minimal() +
