@@ -841,7 +841,120 @@ metrics_remeasured <- rbind(
 
 #############################################################################
 
+# 05 - validation using the model only trained with RTK plots
+#-------------------------------------------------------------------------------
 
+# read test plots
+test_lon <- readRDS( 
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon_filtered_rtk_only.RDS')
+)
+test_loff <- readRDS( 
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff_filtered_rtk_only.RDS')
+)
+test_lon <- sf::st_drop_geometry(test_lon)
+test_loff <- sf::st_drop_geometry(test_loff)
+
+################################################################################
+# leaf-on --> leaf-on
+################################################################################
+
+# predict for all plots with the leaf-on model
+pred_values_lon <- stats::predict(rf_model_lon, test_lon)
+
+# create validation dataframe
+val_df_lon <- data.frame(
+  kspnr = test_lon$kspnr,
+  observed = test_lon$vol_ha,
+  predicted = pred_values_lon
+)
+
+# calculate validation metrics
+rmse_lon <- round(sqrt(mean((val_df_lon$predicted - val_df_lon$observed)^2, na.rm = TRUE)), 2)
+rel_rmse_lon <- round((rmse_lon / mean(val_df_lon$observed)) * 100, 2)
+bias_lon <- round(mean(val_df_lon$predicted - val_df_lon$observed, na.rm = TRUE), 2)
+rel_bias_lon <- round((bias_lon / mean(val_df_lon$observed)) * 100, 2)
+cat("Overall RMSE leaf-on:", rmse_lon, "\n")
+cat("Overall relative RMSE leaf-on:", rel_rmse_lon, "%\n")
+cat("Overall bias leaf-on:", bias_lon, "\n")
+cat("Overall relative bias leaf-on:", rel_bias_lon, "%\n")
+
+################################################################################
+# leaf-off --> leaf-off
+################################################################################
+
+pred_values_loff <- stats::predict(rf_model_loff, test_loff)
+
+val_df_loff <- data.frame(
+  kspnr = test_loff$kspnr,
+  observed = test_loff$vol_ha,
+  predicted = pred_values_loff
+)
+
+rmse_loff <- round(sqrt(mean((val_df_loff$predicted - val_df_loff$observed)^2, na.rm = TRUE)), 2)
+rel_rmse_loff <- round((rmse_loff / mean(val_df_loff$observed)) * 100, 2)
+bias_loff <- round(mean(val_df_loff$predicted - val_df_loff$observed, na.rm = TRUE), 2)
+rel_bias_loff <- round((bias_loff / mean(val_df_loff$observed)) * 100, 2)
+cat("Overall RMSE leaf-off:", rmse_loff, "\n")
+cat("Overall relative RMSE leaf-off:", rel_rmse_loff, "%\n")
+cat("Overall bias leaf-off:", bias_loff, "\n")
+cat("Overall relative bias leaf-off:", rel_bias_loff, "%\n")
+
+################################################################################
+# leaf-on --> leaf-off
+################################################################################
+
+pred_values_lon_on_loff <- stats::predict(rf_model_lon, test_loff)
+
+val_df_lon_on_loff <- data.frame(
+  kspnr = test_loff$kspnr,
+  observed = test_loff$vol_ha,
+  predicted = pred_values_lon_on_loff
+)
+
+rmse_lon_on_loff <- round(sqrt(mean((val_df_lon_on_loff$predicted - val_df_lon_on_loff$observed)^2, na.rm = TRUE)), 2)
+rel_rmse_lon_on_loff <- round((rmse_lon_on_loff / mean(val_df_lon_on_loff$observed)) * 100, 2)
+bias_lon_on_loff <- round(mean(val_df_lon_on_loff$predicted - val_df_lon_on_loff$observed, na.rm = TRUE), 2)
+rel_bias_lon_on_loff <- round((bias_lon_on_loff / mean(val_df_lon_on_loff$observed)) * 100, 2)
+cat("Overall RMSE leaf-on model on leaf-off data:", rmse_lon_on_loff, "\n")
+cat("Overall relative RMSE leaf-on model on leaf-off data:", rel_rmse_lon_on_loff, "%\n")
+cat("Overall bias leaf-on model on leaf-off data:", bias_lon_on_loff, "\n")
+cat("Overall relative bias leaf-on model on leaf-off data:", rel_bias_lon_on_loff, "%\n")
+
+################################################################################
+# leaf-off --> leaf-on
+################################################################################
+
+pred_values_loff_on_lon <- stats::predict(rf_model_loff, test_lon)
+
+val_df_loff_on_lon <- data.frame(
+  kspnr = test_lon$kspnr,
+  observed = test_lon$vol_ha,
+  predicted = pred_values_loff_on_lon
+)
+
+rmse_loff_on_lon <- round(sqrt(mean((val_df_loff_on_lon$predicted - val_df_loff_on_lon$observed)^2, na.rm = TRUE)), 2)
+rel_rmse_loff_on_lon <- round((rmse_loff_on_lon / mean(val_df_loff_on_lon$observed)) * 100, 2)
+bias_loff_on_lon <- round(mean(val_df_loff_on_lon$predicted - val_df_loff_on_lon$observed, na.rm = TRUE), 2)
+rel_bias_loff_on_lon <- round((bias_loff_on_lon / mean(val_df_loff_on_lon$observed)) * 100, 2)
+cat("Overall RMSE leaf-off model on leaf-on data:", rmse_loff_on_lon, "\n")
+cat("Overall relative RMSE leaf-off model on leaf-on data:", rel_rmse_loff_on_lon, "%\n")
+cat("Overall bias leaf-off model on leaf-on data:", bias_loff_on_lon, "\n")
+cat("Overall relative bias leaf-off model on leaf-on data:", rel_bias_loff_on_lon, "%\n")
+
+################################################################################
+# final data frame with error metrics
+################################################################################
+
+metrics_all <- rbind(
+  calc_metrics(val_df_lon, "Leaf-on model on leaf-on data", leaf_type_col = NULL),
+  calc_metrics(val_df_loff, "Leaf-off model on leaf-off data", leaf_type_col = NULL),
+  calc_metrics(val_df_lon_on_loff, "Leaf-on model on leaf-off data", leaf_type_col = NULL),
+  calc_metrics(val_df_loff_on_lon, "Leaf-off model on leaf-on data", leaf_type_col = NULL)
+)
+
+print(metrics_all)
+
+################################################################################
 
 
 
