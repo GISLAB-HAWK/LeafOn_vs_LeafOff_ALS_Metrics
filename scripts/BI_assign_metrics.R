@@ -1,10 +1,20 @@
+#-------------------------------------------------------------------------------
+# Name:         BI_assign_metrics.R
+# Description:  join RSDB output(csv file with metrics per plot) with BI data 
+#               to recieve one gpkg containing all the information needed
+#               for modelling the growing stock.
+# Author:       Svenja Dobelmann
+# Contact:      svenja.dobelmann@hawk.de
+#-------------------------------------------------------------------------------
+
+
 # load libraries
 library(sf)
 library(terra)
 library(dplyr)
 
 # set working directory 
-setwd("C:/Users/sdobelma/Documents/LeafOn_vs_LeafOff_ALS/")
+setwd("R:/AG_Magdon/datensaetze/solling/dobelmann/Repo_LeafOn_vs_LeafOff_ALS")
 
 
 # import data 

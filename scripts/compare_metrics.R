@@ -1,4 +1,11 @@
-# compare metrics
+#-------------------------------------------------------------------------------
+# Name:         compare_metrics.R
+# Description:  compare Metrics for the two rasters between leaf-on and leaf-off 
+#               conditions.
+# Author:       Svenja Dobelmann
+# Contact:      svenja.dobelmann@hawk.de
+#-------------------------------------------------------------------------------
+
 
 library(terra)
 library(dplyr)

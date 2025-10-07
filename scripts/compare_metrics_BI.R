@@ -1,5 +1,5 @@
 #-------------------------------------------------------------------------------
-# Name:         compare_emtrics_BI.R
+# Name:         compare_metrics_BI.R
 # Description:  compare Metrics for the BI plots between leaf-on and leaf-off 
 #               conditions.
 # Author:       Svenja Dobelmann
@@ -15,7 +15,7 @@ library(ggplot2)
 library(ggfortify)
 library(ggpubr)
 
-setwd("C:/Users/sdobelma/Documents/LeafOn_vs_LeafOff_ALS/")
+setwd("R:/AG_Magdon/datensaetze/solling/dobelmann/Repo_LeafOn_vs_LeafOff_ALS")
 
 # files paths 
 loff_df_file <- "data/BI_indices_2024_RTK_harm.csv"

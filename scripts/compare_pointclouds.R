@@ -1,3 +1,11 @@
+#--------------------------------------------------------------------------
+# Name:         compare_pointcloud.R
+# Description:  comparing the harmonized laz files in the point cloud level
+#               checking pulse count etc. 
+# Author:       Svenja Dobelmann
+#--------------------------------------------------------------------------
+
+# TBC! 
 # compare point clouds
 
 library(lasR)
