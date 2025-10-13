@@ -6,8 +6,11 @@
 #               (BI plots) are used as predictors. Two models are trained,
 #               one using the the metrics calculated from leaf-on dataset,
 #               and one using the metrics calculated from leaf-off dataset.
-#               Leave-Location-Out cross-validation (LLO CV) is used as a 
-#               spatial cross validation method.
+#               Nearest Neighbour Distance Matching (NNDM) 
+#               Leave-One-Out Cross Validation (LOO CV) is used as a 
+#               spatial map validation method.
+#               The models are trained separately for deciduous and coniferous
+#               dominated plots.
 #               80% of each dataset is used for training the models.
 # Author:       Florian Franz
 # Contact:      florian.franz@nw-fva.de
@@ -26,7 +29,7 @@ source('src/setup.R', local = TRUE)
 # read data with inventory plots (BI) 
 # and calculated metrics (leaf-on and leaf-off) and extracted tree species
 plot_metrics <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'vol_stp_metrics_rtk.gpkg')
+  file.path(processed_data_dir, 'metrics', 'vol_stp_filtered_metrics.gpkg')
   )
 
 head(plot_metrics)
@@ -55,7 +58,10 @@ ggplot() +
 plot_metrics <- na.omit(plot_metrics)
 
 # split data for leaf-on and leaf-off
-id_cols <- c('key', 'kspnr', 'abt', 'vol_ha', 'ts')
+id_cols <- c(
+  'key', 'kspnr', 'abt', 'vol_ha', 'tree_density',
+  'basal_area_ha', 'dg', 'dominant_leaf_type', 'remeasured'
+  )
 
 # select identifier columns + leaf-on metrics
 plot_metrics_lon <- dplyr::select(
@@ -71,9 +77,24 @@ plot_metrics_loff <- dplyr::select(
   dplyr::starts_with('loff_')
 )
 
+# filter plots by dominant leaf type
+plots_lon_deciduous <- plot_metrics_lon %>%
+  dplyr::filter(dominant_leaf_type == 'deciduous')
+
+plots_lon_coniferous <- plot_metrics_lon %>%
+  dplyr::filter(dominant_leaf_type == 'coniferous')
+
+plots_loff_deciduous <- plot_metrics_loff %>%
+  dplyr::filter(dominant_leaf_type == 'deciduous')
+
+plots_loff_coniferous <- plot_metrics_loff %>%
+  dplyr::filter(dominant_leaf_type == 'coniferous')
+
 # df versions
-plot_metrics_lon_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon))
-plot_metrics_loff_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff))
+#plot_metrics_lon_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon))
+#plot_metrics_loff_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff))
+plots_lon_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_deciduous))
+plots_lon_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_coniferous))
 
 
 
@@ -84,19 +105,21 @@ plot_metrics_loff_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff))
 #                           START DRAFT - cv testing                           #
 
 # random 5-fold cross-validation (cv)
-fold5 <- caret::createFolds(1:nrow(plot_metrics_loff), k = 5, returnTrain = F)
+fold5 <- caret::createFolds(1:nrow(plots_lon_coniferous), k = 5, returnTrain = F)
 
 predcond_cv_fold5 <- CAST::geodist(
-  x = plot_metrics_loff,
+  x = plots_lon_coniferous,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = fold5
   )
 
 # leave-one-out cv (loocv)
-loo_cv <- caret::createFolds(1:nrow(plot_metrics_loff), k = nrow(plot_metrics_loff), returnTrain = F)
+loo_cv <- caret::createFolds(
+  1:nrow(plots_lon_coniferous), k = nrow(plots_lon_coniferous), returnTrain = F
+  )
 
 predcond_loo_cv <- CAST::geodist(
-  x = plot_metrics_loff,
+  x = plots_lon_coniferous,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = loo_cv
 )
@@ -104,13 +127,15 @@ predcond_loo_cv <- CAST::geodist(
 # nearest neighbour distance matching (nndm) 
 # leave-one-out (loo) cv
 nndm <- CAST::nndm(
-  tpoints = plot_metrics_lon,
-  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(plot_metrics_lon)),
-  samplesize = 1000
+  tpoints = plots_loff_deciduous,
+  modeldomain = sf::st_transform(
+    sf::st_zm(ext_loff),
+    sf::st_crs(plots_loff_deciduous)),
+  samplesize = 500
 )
 
 predcond_cv_nndm <- CAST::geodist(
-  x = plot_metrics_lon,
+  x = plots_lon_deciduous,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = nndm$indx_test
   )
@@ -122,14 +147,14 @@ indices_llo_cv_results <- list()
 
 for(k in k_values) {
   spatial_folds <- CAST::CreateSpacetimeFolds(
-    x = plot_metrics_loff,
+    x = plots_lon_coniferous,
     spacevar = 'abt',
     k = k,
     seed = 11
   )
   
   indices_llo_cv_results[[paste0('k', k)]] <- CAST::geodist(
-    x = plot_metrics_loff,
+    x = plots_lon_coniferous,
     modeldomain = sf::st_zm(ext_loff),
     cvfolds = spatial_folds$indexOut
   )
@@ -137,17 +162,17 @@ for(k in k_values) {
 
 sapply(indices_llo_cv_results, function(x) attr(x, 'W_CV'))
 
-plot_metrics_lon$abt <- as.character(plot_metrics_lon$abt)
+plots_lon_coniferous$abt <- as.character(plots_lon_coniferous$abt)
 
 indices_llo_cv <- CAST::CreateSpacetimeFolds(
-  x = plot_metrics_lon,
+  x = plots_lon_coniferous,
   spacevar = 'abt',
-  k = 10,
+  k = 7,
   seed = 22
 )
 
 predcond_llo_cv <- CAST::geodist(
-  x = plot_metrics_lon,
+  x = plots_lon_coniferous,
   modeldomain = sf::st_zm(ext_loff),
   cvfolds = indices_llo_cv$indexOut
 )
@@ -182,8 +207,8 @@ vol_ha_lon_fold5_ctrl <- caret::trainControl(
   method = 'cv', number = 5, savePredictions = T
   )
 vol_ha_lon_fold5_mod <- caret::train(
-  plot_metrics_loff_df[,5:length(plot_metrics_loff_df)],
-  plot_metrics_loff_df[,'vol_ha'],
+  plots_lon_coniferous_df[,10:length(plots_lon_coniferous_df)],
+  plots_lon_coniferous_df[,'vol_ha'],
   method = 'rf',
   importance = F,
   trControl = vol_ha_lon_fold5_ctrl,
@@ -200,8 +225,8 @@ vol_ha_lon_nndm_ctrl <- caret::trainControl(
   savePredictions = T
 )
 vol_ha_lon_nndm_mod <- caret::train(
-  plot_metrics_lon_df[,6:length(plot_metrics_lon_df)],
-  plot_metrics_lon_df[,'vol_ha'],
+  plots_lon_coniferous_df[,10:length(plots_lon_coniferous_df)],
+  plots_lon_coniferous_df[,'vol_ha'],
   method = 'rf',
   importance = F,
   trControl = vol_ha_lon_nndm_ctrl,
@@ -247,48 +272,100 @@ rbind(
 #                         START DRAFT - model training                         #
 
 # split data into training and testing
+
+# deciduous
 set.seed(11)
-trainIndex_lon <- caret::createDataPartition(
-  plot_metrics_lon$vol_ha,
+trainIndex_lon_deciduous <- caret::createDataPartition(
+  plots_lon_deciduous$vol_ha,
   p = 0.8, list = F)
 
-train_lon <- plot_metrics_lon[trainIndex_lon,]
-test_lon <- plot_metrics_lon[-trainIndex_lon,]
+train_lon_deciduous <- plots_lon_deciduous[trainIndex_lon_deciduous,]
+test_lon_deciduous <- plots_lon_deciduous[-trainIndex_lon_deciduous,]
 
 set.seed(11)
-trainIndex_loff <- caret::createDataPartition(
-  plot_metrics_loff$vol_ha,
+trainIndex_loff_deciduous <- caret::createDataPartition(
+  plots_loff_deciduous$vol_ha,
   p = 0.8, list = F)
 
-train_loff <- plot_metrics_loff[trainIndex_loff,]
-test_loff <- plot_metrics_loff[-trainIndex_loff,]
+train_loff_deciduous <- plots_loff_deciduous[trainIndex_loff_deciduous,]
+test_loff_deciduous <- plots_loff_deciduous[-trainIndex_loff_deciduous,]
 
-names(train_lon) <- sub('^lon_', '', names(train_lon))
-names(test_lon) <- sub('^lon_', '', names(test_lon))
-names(train_loff) <- sub('^loff_', '', names(train_loff))
-names(test_loff) <- sub('^loff_', '', names(test_loff))
+names(train_lon_deciduous) <- sub('^lon_', '', names(train_lon_deciduous))
+names(test_lon_deciduous) <- sub('^lon_', '', names(test_lon_deciduous))
+names(train_loff_deciduous) <- sub('^loff_', '', names(train_loff_deciduous))
+names(test_loff_deciduous) <- sub('^loff_', '', names(test_loff_deciduous))
 
 saveRDS(
-  train_lon,
-  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon.RDS')
+  train_lon_deciduous,
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon_deciduous_filtered.RDS')
 )
 saveRDS(
-  test_lon, 
-  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon.RDS')
+  test_lon_deciduous, 
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon_deciduous_filtered.RDS')
 )
 saveRDS(
-  train_loff, 
-  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff.RDS')
+  train_loff_deciduous, 
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff_deciduous_filtered.RDS')
 )
 saveRDS(
-  test_loff,
-  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff.RDS')
+  test_loff_deciduous,
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff_deciduous_filtered.RDS')
+)
+
+# coniferous
+set.seed(11)
+trainIndex_lon_coniferous <- caret::createDataPartition(
+  plots_lon_coniferous$vol_ha,
+  p = 0.8, list = F)
+
+train_lon_coniferous <- plots_lon_coniferous[trainIndex_lon_coniferous,]
+test_lon_coniferous <- plots_lon_coniferous[-trainIndex_lon_coniferous,]
+
+set.seed(11)
+trainIndex_loff_coniferous <- caret::createDataPartition(
+  plots_loff_coniferous$vol_ha,
+  p = 0.8, list = F)
+
+train_loff_coniferous <- plots_loff_coniferous[trainIndex_loff_coniferous,]
+test_loff_coniferous <- plots_loff_coniferous[-trainIndex_loff_coniferous,]
+
+names(train_lon_coniferous) <- sub('^lon_', '', names(train_lon_coniferous))
+names(test_lon_coniferous) <- sub('^lon_', '', names(test_lon_coniferous))
+names(train_loff_coniferous) <- sub('^loff_', '', names(train_loff_coniferous))
+names(test_loff_coniferous) <- sub('^loff_', '', names(test_loff_coniferous))
+
+saveRDS(
+  train_lon_coniferous,
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafon_coniferous_filtered.RDS')
+)
+saveRDS(
+  test_lon_coniferous, 
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafon_coniferous_filtered.RDS')
+)
+saveRDS(
+  train_loff_coniferous, 
+  file.path(processed_data_dir, 'train_test_ds', 'train_ds_leafoff_coniferous_filtered.RDS')
+)
+saveRDS(
+  test_loff_coniferous,
+  file.path(processed_data_dir, 'train_test_ds', 'test_ds_leafoff_coniferous_filtered.RDS')
 )
 
 # define predictors and response
-predictors_lon <- sf::st_drop_geometry(train_lon[,5:length(train_lon)])
-predictors_loff <- sf::st_drop_geometry(train_loff[,5:length(train_loff)])
-response <- sf::st_drop_geometry(train_lon[,'vol_ha'])
+predictors_lon_deciduous <- sf::st_drop_geometry(
+  train_lon_deciduous[,10:length(train_lon_deciduous)]
+  )
+predictors_loff_deciduous <- sf::st_drop_geometry(
+  train_loff_deciduous[,10:length(train_loff_deciduous)]
+  )
+predictors_lon_coniferous <- sf::st_drop_geometry(
+  train_lon_coniferous[,10:length(train_lon_coniferous)]
+)
+predictors_loff_coniferous <- sf::st_drop_geometry(
+  train_loff_coniferous[,10:length(train_loff_coniferous)]
+)
+response_deciduous <- sf::st_drop_geometry(train_lon_deciduous[,'vol_ha'])
+response_coniferous <- sf::st_drop_geometry(train_lon_coniferous[,'vol_ha'])
 
 # when including tree species
 # convert to factor
@@ -328,17 +405,29 @@ levels(predictors_loff$ts_gr)
 
 # initialize nearest neighbour distance matching
 # leave-one-out cross-validation (NNDM LOO CV)
-nndm <- CAST::nndm(
-  tpoints = train_lon,
-  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(train_lon)),
-  samplesize = 1000
+nndm_deciduous <- CAST::nndm(
+  tpoints = train_lon_deciduous,
+  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(train_lon_deciduous)),
+  samplesize = 500
+)
+nndm_coniferous <- CAST::nndm(
+  tpoints = train_lon_coniferous,
+  modeldomain = sf::st_transform(sf::st_zm(ext_loff), sf::st_crs(train_lon_coniferous)),
+  samplesize = 500
 )
 
 # control parameters for the train function
-ctrl <- caret::trainControl(
+ctrl_deciduous <- caret::trainControl(
   method = 'cv',
-  index = nndm$indx_train,
-  indexOut = nndm$indx_test,
+  index = nndm_deciduous$indx_train,
+  indexOut = nndm_deciduous$indx_test,
+  savePredictions = T,
+  allowParallel = T
+)
+ctrl_coniferous <- caret::trainControl(
+  method = 'cv',
+  index = nndm_coniferous$indx_train,
+  indexOut = nndm_coniferous$indx_test,
   savePredictions = T,
   allowParallel = T
 )
@@ -363,7 +452,7 @@ ctrl <- caret::trainControl(
 
 # create grid for tuning features
 tgrid <- expand.grid(
-  mtry = 1:length(predictors_lon),
+  mtry = 1:length(predictors_lon_deciduous),
   splitrule = c('variance', 'extratrees', 'maxstat'),
   min.node.size = c(5,10,15,20)
 )
@@ -375,8 +464,8 @@ doParallel::registerDoParallel(cl)
 
 # train random forest model
 set.seed(11)
-rf_model_lon <- caret::train(
-  predictors_lon,
+rf_model_lon_deciduous <- caret::train(
+  predictors_lon_deciduous,
   response$vol_ha,
   method = 'ranger',
   trControl = ctrl,
@@ -386,8 +475,8 @@ rf_model_lon <- caret::train(
 )
 
 set.seed(11)
-rf_model_loff <- caret::train(
-  predictors_loff,
+rf_model_loff_deciduous <- caret::train(
+  predictors_loff_deciduous,
   response$vol_ha,
   method = 'ranger',
   trControl = ctrl,
@@ -400,34 +489,36 @@ rf_model_loff <- caret::train(
 parallel::stopCluster(cl)
 
 # get model performance and information
-CAST::global_validation(rf_model_lon)
-CAST::global_validation(rf_model_loff)
+CAST::global_validation(rf_model_lon_deciduous)
+CAST::global_validation(rf_model_loff_deciduous)
 print(rf_model_lon)
 print(rf_model_loff)
 
 # correlation plots for lon and loff predictors
-cor_lon <- stats::cor(predictors_lon, method = 'pearson')
-cor_loff <- stats::cor(predictors_loff, method = 'pearson')
+cor_lon <- stats::cor(predictors_lon_deciduous, method = 'pearson')
+cor_loff <- stats::cor(predictors_loff_deciduous, method = 'pearson')
 corrplot::corrplot(cor_lon, method = 'color', type = 'full',
                    tl.col = 'black', tl.cex = 0.6, addCoef.col = NA)
 corrplot::corrplot(cor_loff, method = 'color', type = 'full',
                    tl.col = 'black', tl.cex = 0.6, addCoef.col = NA)
 
 # variable importance
-plot(caret::varImp(rf_model_lon))
-plot(caret::varImp(rf_model_loff))
+plot(caret::varImp(rf_model_lon_deciduous))
+plot(caret::varImp(rf_model_loff_deciduous))
 
 # train random forest model
 # implementing forward feature selection
+
+# deciduous
 n_cores <- parallel::detectCores() - 2 
 cl <- parallel::makeCluster(n_cores)
 doParallel::registerDoParallel(cl)
 
-ffs_rf_model_lon <- CAST::ffs(
-  predictors_lon,
-  response$vol_ha,
+ffs_rf_model_lon_deciduous <- CAST::ffs(
+  predictors_lon_deciduous,
+  response_deciduous$vol_ha,
   method = 'ranger',
-  trControl = ctrl,
+  trControl = ctrl_deciduous,
   tuneGrid = tgrid,
   num.trees = 100,
   importance = 'permutation',
@@ -440,11 +531,11 @@ n_cores <- parallel::detectCores() - 2
 cl <- parallel::makeCluster(n_cores)
 doParallel::registerDoParallel(cl)
 
-ffs_rf_model_loff <- CAST::ffs(
-  predictors_loff,
-  response$vol_ha,
+ffs_rf_model_loff_deciduous <- CAST::ffs(
+  predictors_loff_deciduous,
+  response_deciduous$vol_ha,
   method = 'ranger',
-  trControl = ctrl,
+  trControl = ctrl_deciduous,
   tuneGrid = tgrid,
   num.trees = 100,
   importance = 'permutation',
@@ -455,71 +546,167 @@ parallel::stopCluster(cl)
 
 # save trained models
 saveRDS(
-  ffs_rf_model_lon,
-  file.path(processed_data_dir, 'models' , 'ffs_rf_model_leafon.RDS')
+  ffs_rf_model_lon_deciduous,
+  file.path(processed_data_dir, 'models' , 'ffs_rf_model_leafon_deciduous_filtered.RDS')
   )
 saveRDS(
-  ffs_rf_model_loff,
-  file.path(processed_data_dir, 'models', 'ffs_rf_model_leafoff.RDS')
+  ffs_rf_model_loff_deciduous,
+  file.path(processed_data_dir, 'models', 'ffs_rf_model_leafoff_deciduous_filtered.RDS')
   )
 
+# coniferous
+n_cores <- parallel::detectCores() - 2 
+cl <- parallel::makeCluster(n_cores)
+doParallel::registerDoParallel(cl)
+
+ffs_rf_model_lon_coniferous <- CAST::ffs(
+  predictors_lon_coniferous,
+  response_coniferous$vol_ha,
+  method = 'ranger',
+  trControl = ctrl_coniferous,
+  tuneGrid = tgrid,
+  num.trees = 100,
+  importance = 'permutation',
+  seed = 999
+)
+
+parallel::stopCluster(cl)
+
+n_cores <- parallel::detectCores() - 2 
+cl <- parallel::makeCluster(n_cores)
+doParallel::registerDoParallel(cl)
+
+ffs_rf_model_loff_coniferous <- CAST::ffs(
+  predictors_loff_coniferous,
+  response_coniferous$vol_ha,
+  method = 'ranger',
+  trControl = ctrl_coniferous,
+  tuneGrid = tgrid,
+  num.trees = 100,
+  importance = 'permutation',
+  seed = 999
+)
+
+parallel::stopCluster(cl)
+
+# save trained models
+saveRDS(
+  ffs_rf_model_lon_coniferous,
+  file.path(processed_data_dir, 'models' , 'ffs_rf_model_leafon_coniferous_filtered.RDS')
+)
+saveRDS(
+  ffs_rf_model_loff_coniferous,
+  file.path(processed_data_dir, 'models', 'ffs_rf_model_leafoff_coniferous_filtered.RDS')
+)
+
 # get model performance and information
-ffs_rf_model_lon
-CAST::global_validation(ffs_rf_model_lon)
-ffs_rf_model_loff
-CAST::global_validation(ffs_rf_model_loff)
+ffs_rf_model_lon_deciduous
+CAST::global_validation(ffs_rf_model_lon_deciduous)
+ffs_rf_model_loff_deciduous
+CAST::global_validation(ffs_rf_model_loff_deciduous)
+
+ffs_rf_model_lon_coniferous
+CAST::global_validation(ffs_rf_model_lon_coniferous)
+ffs_rf_model_loff_coniferous
+CAST::global_validation(ffs_rf_model_loff_coniferous)
 
 # plot model performance
 plot(ffs_rf_model_lon)
 plot(ffs_rf_model_loff)
 
 # extract cross-validation predictions from the trained models
-cv_pred_lon <- ffs_rf_model_lon$pred
-cv_pred_loff <- ffs_rf_model_loff$pred
+cv_pred_lon_deciduous <- ffs_rf_model_lon_deciduous$pred
+cv_pred_loff_deciduous <- ffs_rf_model_loff_deciduous$pred
+cv_pred_lon_coniferous <- ffs_rf_model_lon_coniferous$pred
+cv_pred_loff_coniferous <- ffs_rf_model_loff_coniferous$pred
 
 # the cv predictions contain multiple rows per observation due to resampling
 # get final predictions for each observation
-final_pred_lon <- cv_pred_lon %>%
+
+# deciduous
+final_pred_lon_deciduous <- cv_pred_lon_deciduous %>%
   dplyr::filter(
-    mtry == ffs_rf_model_lon$bestTune$mtry,
-    splitrule == ffs_rf_model_lon$bestTune$splitrule,
-    min.node.size == ffs_rf_model_lon$bestTune$min.node.size) %>%
+    mtry == ffs_rf_model_lon_deciduous$bestTune$mtry,
+    splitrule == ffs_rf_model_lon_deciduous$bestTune$splitrule,
+    min.node.size == ffs_rf_model_lon_deciduous$bestTune$min.node.size) %>%
   dplyr::group_by(rowIndex) %>%
   dplyr::summarise(pred = mean(pred), obs = first(obs), .groups = 'drop')
 
-final_pred_loff <- cv_pred_loff %>%
+final_pred_loff_deciduous <- cv_pred_loff_deciduous %>%
   dplyr::filter(
-    mtry == ffs_rf_model_loff$bestTune$mtry,
-    splitrule == ffs_rf_model_loff$bestTune$splitrule,
-    min.node.size == ffs_rf_model_loff$bestTune$min.node.size) %>%
+    mtry == ffs_rf_model_loff_deciduous$bestTune$mtry,
+    splitrule == ffs_rf_model_loff_deciduous$bestTune$splitrule,
+    min.node.size == ffs_rf_model_loff_deciduous$bestTune$min.node.size) %>%
   dplyr::group_by(rowIndex) %>%
   dplyr::summarise(pred = mean(pred), obs = first(obs), .groups = 'drop')
 
 # link it to the original geometries (BI plots used for training)
-final_pred_lon_sf <- train_lon[final_pred_lon$rowIndex, ] %>%
+final_pred_lon_deciduous_sf <- train_lon_deciduous[final_pred_lon_deciduous$rowIndex, ] %>%
   dplyr::select(key, kspnr, abt) %>%
   dplyr::mutate(
-    pred = final_pred_lon$pred,
-    obs = final_pred_lon$obs,
+    pred = final_pred_lon_deciduous$pred,
+    obs = final_pred_lon_deciduous$obs,
   )
 sf::st_write(
-  final_pred_lon_sf,
-  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_lon.gpkg')
+  final_pred_lon_deciduous_sf,
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_lon_deciduous_filtered.gpkg')
 )
 
-final_pred_loff_sf <- train_loff[final_pred_loff$rowIndex, ] %>%
+final_pred_loff_deciduous_sf <- train_loff_deciduous[final_pred_loff_deciduous$rowIndex, ] %>%
   dplyr::select(key, kspnr, abt) %>%
   dplyr::mutate(
-    pred = final_pred_loff$pred,
-    obs = final_pred_loff$obs
+    pred = final_pred_loff_deciduous$pred,
+    obs = final_pred_loff_deciduous$obs
   )
 sf::st_write(
-  final_pred_loff_sf,
-  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_loff.gpkg')
+  final_pred_loff_deciduous_sf,
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_loff_deciduous_filtered.gpkg')
+)
+
+# coniferous
+final_pred_lon_coniferous <- cv_pred_lon_coniferous %>%
+  dplyr::filter(
+    mtry == ffs_rf_model_lon_coniferous$bestTune$mtry,
+    splitrule == ffs_rf_model_lon_coniferous$bestTune$splitrule,
+    min.node.size == ffs_rf_model_lon_coniferous$bestTune$min.node.size) %>%
+  dplyr::group_by(rowIndex) %>%
+  dplyr::summarise(pred = mean(pred), obs = first(obs), .groups = 'drop')
+
+final_pred_loff_coniferous <- cv_pred_loff_coniferous %>%
+  dplyr::filter(
+    mtry == ffs_rf_model_loff_coniferous$bestTune$mtry,
+    splitrule == ffs_rf_model_loff_coniferous$bestTune$splitrule,
+    min.node.size == ffs_rf_model_loff_coniferous$bestTune$min.node.size) %>%
+  dplyr::group_by(rowIndex) %>%
+  dplyr::summarise(pred = mean(pred), obs = first(obs), .groups = 'drop')
+
+# link it to the original geometries (BI plots used for training)
+final_pred_lon_coniferous_sf <- train_lon_coniferous[final_pred_lon_coniferous$rowIndex, ] %>%
+  dplyr::select(key, kspnr, abt) %>%
+  dplyr::mutate(
+    pred = final_pred_lon_coniferous$pred,
+    obs = final_pred_lon_coniferous$obs,
+  )
+sf::st_write(
+  final_pred_lon_coniferous_sf,
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_lon_coniferous_filtered.gpkg')
+)
+
+final_pred_loff_coniferous_sf <- train_loff_coniferous[final_pred_loff_coniferous$rowIndex, ] %>%
+  dplyr::select(key, kspnr, abt) %>%
+  dplyr::mutate(
+    pred = final_pred_loff_coniferous$pred,
+    obs = final_pred_loff_coniferous$obs
+  )
+sf::st_write(
+  final_pred_loff_coniferous_sf,
+  file.path(processed_data_dir, 'predictions', 'pred_obsv_train_loff_coniferous_filtered.gpkg')
 )
 
 # plot predicted vs. observed GSV with CV predictions
-ggplot(final_pred_lon, aes(x=obs, y=pred)) +
+
+# deciduous
+ggplot(final_pred_lon_deciduous, aes(x=obs, y=pred)) +
   geom_point() +
   xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
   ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
@@ -531,7 +718,7 @@ ggplot(final_pred_lon, aes(x=obs, y=pred)) +
   geom_abline(slope=1, intercept=0, linewidth=1, color='red') +
   ggtitle('leaf-on')
 
-ggplot(final_pred_loff, aes(x=obs, y=pred)) +
+ggplot(final_pred_loff_deciduous, aes(x=obs, y=pred)) +
   geom_point() +
   xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
   ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
@@ -542,6 +729,105 @@ ggplot(final_pred_loff, aes(x=obs, y=pred)) +
   scale_y_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
   geom_abline(slope=1, intercept=0, linewidth=1, color='red') +
   ggtitle('leaf-off')
+
+final_pred_lon_loff_deciduous <- dplyr::bind_rows(
+  final_pred_lon_deciduous %>% dplyr::mutate(condition = 'leaf-on'),
+  final_pred_loff_deciduous %>% dplyr::mutate(condition = 'leaf-off')
+)
+
+stats_summary_deciduous <- final_pred_lon_loff_deciduous %>%
+  dplyr::group_by(condition) %>%
+  dplyr::summarise(
+    rmse = sqrt(mean((pred - obs)^2, na.rm = T)),
+    rrmse = (sqrt(mean((pred - obs)^2, na.rm = T)) / mean(obs, na.rm = T)),
+    r_squared = stats::cor(obs, pred, use = 'complete.obs')^2,
+    .groups = 'drop'
+  )
+
+text_labels_deciduous <- paste0(
+  'leaf-on: rRMSE = ', round(stats_summary_deciduous$rrmse[stats_summary_deciduous$condition == 'leaf-on'], 2),
+  ', R² = ', round(stats_summary_deciduous$r_squared[stats_summary_deciduous$condition == 'leaf-on'], 2), '\n',
+  'leaf-off: rRMSE = ', round(stats_summary_deciduous$rrmse[stats_summary_deciduous$condition == 'leaf-off'], 2),
+  ', R² = ', round(stats_summary_deciduous$r_squared[stats_summary_deciduous$condition == 'leaf-off'], 2)
+)
+
+ggplot(final_pred_lon_loff_deciduous, aes(x = obs, y = pred, color = condition)) +
+  geom_point() +
+  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
+  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "top") +
+  coord_fixed(ratio = 1) +
+  scale_x_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
+  scale_y_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
+  scale_color_manual(values = c('leaf-on' = 'gray60', 'leaf-off' = 'gray30'),
+                     name = 'Condition') +
+  geom_abline(slope = 1, intercept = 0, linewidth = 1, color = 'red') +
+  annotate('text', x = 475, y = 10, label = text_labels_deciduous, 
+           hjust = 0, vjust = 0, size = 3.5, color = 'black')
+
+# coniferous
+ggplot(final_pred_lon_coniferous, aes(x=obs, y=pred)) +
+  geom_point() +
+  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
+  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_fixed(ratio = 1) +
+  scale_x_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
+  scale_y_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
+  geom_abline(slope=1, intercept=0, linewidth=1, color='red') +
+  ggtitle('leaf-on')
+
+ggplot(final_pred_loff_coniferous, aes(x=obs, y=pred)) +
+  geom_point() +
+  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
+  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_fixed(ratio = 1) +
+  scale_x_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
+  scale_y_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
+  geom_abline(slope=1, intercept=0, linewidth=1, color='red') +
+  ggtitle('leaf-off')
+
+final_pred_lon_loff_coniferous <- dplyr::bind_rows(
+  final_pred_lon_coniferous %>% dplyr::mutate(condition = 'leaf-on'),
+  final_pred_loff_coniferous %>% dplyr::mutate(condition = 'leaf-off')
+)
+
+stats_summary_coniferous <- final_pred_lon_loff_coniferous %>%
+  dplyr::group_by(condition) %>%
+  dplyr::summarise(
+    rmse = sqrt(mean((pred - obs)^2, na.rm = T)),
+    rrmse = (sqrt(mean((pred - obs)^2, na.rm = T)) / mean(obs, na.rm = T)),
+    r_squared = stats::cor(obs, pred, use = 'complete.obs')^2,
+    .groups = 'drop'
+  )
+
+text_labels_coniferous <- paste0(
+  'leaf-on: rRMSE = ', round(stats_summary_coniferous$rrmse[stats_summary_coniferous$condition == 'leaf-on'], 2),
+  ', R² = ', round(stats_summary_coniferous$r_squared[stats_summary_coniferous$condition == 'leaf-on'], 2), '\n',
+  'leaf-off: rRMSE = ', round(stats_summary_coniferous$rrmse[stats_summary_coniferous$condition == 'leaf-off'], 2),
+  ', R² = ', round(stats_summary_coniferous$r_squared[stats_summary_coniferous$condition == 'leaf-off'], 2)
+)
+
+ggplot(final_pred_lon_loff_coniferous, aes(x = obs, y = pred, color = condition)) +
+  geom_point() +
+  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
+  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "top") +
+  coord_fixed(ratio = 1) +
+  scale_x_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
+  scale_y_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
+  scale_color_manual(values = c('leaf-on' = 'gray60', 'leaf-off' = 'gray30'),
+                     name = 'Condition') +
+  geom_abline(slope = 1, intercept = 0, linewidth = 1, color = 'red') +
+  annotate('text', x = 475, y = 10, label = text_labels_coniferous, 
+           hjust = 0, vjust = 0, size = 3.5, color = 'black')
 
 #                           END DRAFT - model training                         #
 ################################################################################
