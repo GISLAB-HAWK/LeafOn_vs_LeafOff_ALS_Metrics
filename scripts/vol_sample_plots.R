@@ -39,23 +39,23 @@ bi_data <- list.files(bi_path)
 bi_points <- read.table(
   file.path(bi_path, 'tblDatPh2_ZE.txt'),
   header = T, sep = ';'
-  )
+)
 
 bi_trees <- read.table(
   file.path(bi_path, 'tblDatPh2_Vorr_ZE.txt'),
   header = T, sep = ';'
-  )
+)
 
 # select desired forestry offices (Solling --> Neuhaus, Dassel)
 bi_points <- bi_points[
   bi_points$DatOrga_Key == '268-2022-002' | 
     bi_points$DatOrga_Key == '254-2022-002',
-  ]
+]
 
 bi_trees <- bi_trees[
   bi_trees$DatOrga_Key == '268-2022-002' |
     bi_trees$DatOrga_Key == '254-2022-002',
-  ]
+]
 
 head(bi_points)
 head(bi_trees)
@@ -123,7 +123,7 @@ bi_trees$bhd <- ifelse(
   bi_trees$bhdklup > 0,
   (0.5 * (bi_trees$bhd + bi_trees$bhdklup)) / 10,
   bi_trees$bhd / 10
-  )
+)
 
 # separate data:
 # trees with diameter at deviating measurement height
@@ -160,14 +160,14 @@ bi_points$hang_rad <- (pi / 180) * bi_points$hang
 bi_points_trees <- merge(
   bi_trees, bi_points[,c("key", "kspnr", "abt", "hang_rad", "rw", "hw")],
   by = c("key", "kspnr")
-  )
+)
 
 # r_plane = r_slope * cos(slope_rad)
 bi_points_trees$nha <- ifelse(
   bi_points_trees$bhd < 30, 
   10000 / (pi * 6**2 * cos(bi_points_trees$hang_rad)),
   10000 / (pi * 13**2 * cos(bi_points_trees$hang_rad))
-  )
+)
 
 ## add heights
 
@@ -185,7 +185,7 @@ dat <- input_ehk(
   bs = bi_points_trees$bestschicht, bhd = bi_points_trees$bhd,
   hoe = bi_points_trees$hoehe, nha = bi_points_trees$nha,
   bagr = bi_points_trees$bagr
-  )
+)
 
 head(dat)
 
@@ -199,7 +199,7 @@ m <- scam::scam(
   hoe ~ s(bhd, bs = 'mpi'),
   data = dat, 
   family = Gamma(link = 'log')
-  )
+)
 
 nd <- data.frame('bhd' = floor(min(dat$bhd)):ceiling(max(dat$bhd)))
 nd$hoe <- predict(m, newdata = nd, type = 'response')
@@ -220,8 +220,8 @@ for (x in seq(10, 110, by = 10)) {
       'bhd' = x - (9 * d / max(d)), 
       'hoe' = 1:60, 
       'x' = x
-      )
     )
+  )
 }
 
 p1 <- p + 
@@ -230,7 +230,7 @@ p1 <- p +
     data = data.frame('bhd' = seq(10, 110, by = 10)), 
     aes(xintercept = bhd, color = factor(bhd)), show.legend = F, 
     linetype = 2
-    )
+  )
 
 v <- 1/m$sig2
 dat$p <- stats::pgamma(q = dat$hoe, shape = (fitted(m)^2)/v, scale = v/fitted(m))
@@ -257,7 +257,7 @@ dat <- input_ehk(
   bs = bi_points_trees$bestschicht, bhd = bi_points_trees$bhd,
   hoe = bi_points_trees$hoehe, nha = bi_points_trees$nha,
   bagr = bi_points_trees$bagr
-  )
+)
 
 dat2 <- dat[dat$hoe == 0,]
 
@@ -274,11 +274,11 @@ plot(dat2$bhd, dat2$hoe_mod)
 
 # merge modeled heights with original table
 bi_points_trees <- merge(
-  bi_points_trees,#
+  bi_points_trees,
   dat2[,c("id", "bnr", "hoe_mod")],
   by.x = c("id2","id"), 
   by.y = c("id", "bnr")
-  )
+)
 
 # remove unneeded data frames
 rm(dat2, dat)
@@ -318,7 +318,7 @@ for(i in unique(vor$ba1)){
   
   data$vol <- TreeGrOSSinR::tg_volumen(ba=i, bhd=data$d, h=data$h, info = F)
   m <-mgcv::gam(vol ~ t2(d, h, k = 10), data = data, family = gaussian(link = 'log'))
-
+  
   vor2$volC <- predict(m, newdata=data.frame(d=vor2$bhd, h=vor2$hoe_mod), type = 'response')
   
   cop <- rbind(cop, vor2)
@@ -336,6 +336,70 @@ vor$volC <- NULL
 bi_points_trees <- vor
 summary(bi_points_trees$vol)
 plot(bi_points_trees$bhd, bi_points_trees$vol)
+
+
+
+# 04: calculate individual tree AGB
+#-------------------------------------------------------------------------------
+
+agb <- bi_points_trees
+
+# recode tree species before applying rBDAT
+agb$ba1 <- ifelse(agb$ba == 110 | agb$ba == 111 | agb$ba == 112, 17,
+           ifelse(agb$ba == 113, 18,
+           ifelse(agb$ba == 211, 15,
+           ifelse(agb$ba == 221, 16,
+           ifelse(agb$ba == 311, 21,
+           ifelse(agb$ba == 320, 22,
+           ifelse(agb$ba == 321, 23,
+           ifelse(agb$ba == 322, 24,
+           ifelse(agb$ba == 323, 25,
+           ifelse(agb$ba == 330 | agb$ba == 331 | agb$ba == 332, 30,
+           ifelse(agb$ba == 341 | agb$ba == 342, 27,
+           ifelse(agb$ba == 351, 31,
+           ifelse(agb$ba == 352 | agb$ba == 442, 33,
+           ifelse(agb$ba == 353 | agb$ba == 355, 35,
+           ifelse(agb$ba == 354 | agb$ba == 452, 29,
+           ifelse(agb$ba == 357, 32,
+           ifelse(agb$ba == 410 | agb$ba == 411 | agb$ba == 412 | agb$ba == 414, 26,
+           ifelse(agb$ba == 420 | agb$ba == 421 | agb$ba == 422, 28,
+           ifelse(agb$ba == 430 | agb$ba == 431, 19,
+           ifelse(agb$ba == 441, 34,
+           ifelse(agb$ba == 451, 36,
+           ifelse(agb$ba == 511 | agb$ba == 513 | agb$ba == 551, 1,
+           ifelse(agb$ba == 512, 2,
+           ifelse(agb$ba == 521, 3,
+           ifelse(agb$ba == 523, 4,
+           ifelse(agb$ba == 541, 13,
+           ifelse(agb$ba == 542, 12,
+           ifelse(agb$ba == 611, 8,
+           ifelse(agb$ba == 711, 5,
+           ifelse(agb$ba == 712, 6,
+           ifelse(agb$ba == 731, 7,
+           ifelse(agb$ba == 810, 9,
+           ifelse(agb$ba == 811, 10,
+           ifelse(agb$ba == 812, 11, vor$ba)
+           )))))))))))))))))))))))))))))))))
+
+# add empty column
+agb$agb <- NA
+
+# calculation of AGB with rBDAT::getBiomass
+for(i in unique(agb$ba1)){
+  
+  print(i)
+  
+  agb$agb <- rBDAT::getBiomass(
+    agb,
+    mapping = c('ba1' = 'spp', 'bhd' = 'D1', 'hoe_mod' = 'H')
+  )
+  
+}
+
+agb$ba1 <- NULL
+bi_points_trees <- agb
+summary(agb)
+plot(agb$bhd, agb$agb)
 
 
 
@@ -466,7 +530,7 @@ if (any(matching_plots)) {
     by.x = 'kspnr', 
     by.y = 'KSPNR', 
     all.x = T
-    )
+  )
   
   # update geometry for remeasured plots
   for (i in which(matching_plots)) {
@@ -565,7 +629,7 @@ if (!file.exists(file.path(out_path, 'vol_stp.txt'))) {
     file = file.path(out_path, 'vol_stp.txt'), 
     sep = ';',
     row.names = F
-    )
+  )
   
 } else {
   
