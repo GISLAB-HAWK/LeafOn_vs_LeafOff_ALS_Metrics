@@ -403,7 +403,7 @@ plot(agb$bhd, agb$agb)
 
 
 
-# 04: aggregate volume per sample plot
+# 05: aggregate volume and AGB per sample plot
 #-------------------------------------------------------------------------------
 
 # add column of leaf type
@@ -414,16 +414,19 @@ bi_points_trees$leaf_type <- ifelse(
   'coniferous'
 )
 
-# group sums of volume, tree density, basal area, and QMD
-# assign dominant leaf type to each plot
+# group sums of volume, AGB,
+# and other forest inventory attributes like
+# tree density, basal area, and QMD
 bi_points_trees <- bi_points_trees %>%
   dplyr::group_by(key, kspnr) %>%
   dplyr::mutate(
     vol_ha = sum(vol * nha),
+    agb_ha = sum(agb * nha) / 1000,
     tree_density = mean(nha),
     basal_area_tree = (pi / 4) * (bhd / 100)^2,
     basal_area_ha = sum(basal_area_tree * nha, na.rm = T),
     dg = sqrt(sum(bhd^2 * nha, na.rm = T) / sum(nha, na.rm = T)),
+    # assign dominant leaf type to each plot
     total_deciduous = sum(dplyr::if_else(
       leaf_type == 'deciduous', nha, 0, missing = 0), na.rm = T),
     total_coniferous = sum(dplyr::if_else(
@@ -436,84 +439,94 @@ bi_points_trees <- bi_points_trees %>%
   dplyr::ungroup()
 
 # extract unique forest inventory variables for all sample plots
-vol_stp <- unique(
-  bi_points_trees[,c("key", "kspnr", "abt", "rw", "hw", "vol_ha", "tree_density",
-                     "basal_area_ha", "dg", "dominant_leaf_type")])
+inv_attr_plots <- unique(
+  bi_points_trees[,c("key", "kspnr", "abt", "rw", "hw", "vol_ha", "agb_ha",
+                     "tree_density", "basal_area_ha", "dg", "dominant_leaf_type")])
 
-vol_stp <- merge(bi_points[,c("key", "kspnr", "abt", "rw", "hw")], 
-                 vol_stp, by=c("key", "kspnr", "abt", "rw", "hw"), 
-                 all.x=T)
+#vol_stp <- merge(bi_points[,c("key", "kspnr", "abt", "rw", "hw")], 
+#                 vol_stp, by=c("key", "kspnr", "abt", "rw", "hw"), 
+#                 all.x=T)
 
-vol_stp[is.na(vol_stp)] <- 0
+inv_attr_plots[is.na(inv_attr_plots)] <- 0
 
-head(vol_stp)
-summary(vol_stp)
-boxplot(vol_stp$vol_ha)
-boxplot(vol_stp$tree_density)
-boxplot(vol_stp$basal_area_ha)
-boxplot(vol_stp$dg)
+head(inv_attr_plots)
+summary(inv_attr_plots)
+
+boxplot(inv_attr_plots$vol_ha)
+boxplot(inv_attr_plots$agb_ha)
+boxplot(inv_attr_plots$tree_density)
+boxplot(inv_attr_plots$basal_area_ha)
+boxplot(inv_attr_plots$dg)
+
+hist(inv_attr_plots$vol_ha)
+hist(inv_attr_plots$agb_ha)
 
 
-# 05: clip sample plots to the AOI
+# 06: clip sample plots to the AOI
 #-------------------------------------------------------------------------------
 
 # conversion to sf object (DHDN / 3-degree Gauss-Kruger zone 3)
-vol_stp_gk <- sf::st_as_sf(vol_stp, coords = c('rw', 'hw'), crs = 31467)
+inv_attr_plots_gk <- sf::st_as_sf(
+  inv_attr_plots, coords = c('rw', 'hw'), crs = 31467
+  )
 
 # transformation to ETRS89 / UTM zone 32N
-vol_stp_utm <- sf::st_transform(vol_stp_gk, crs = 25832)
+inv_attr_plots_utm <- sf::st_transform(inv_attr_plots_gk, crs = 25832)
 
 # quick plot
 par(mfrow = c(1,2))
 lidR::plot(pc_ctg_loff)
-terra::plot(vol_stp_utm$geom, col = 'red', add = T)
+terra::plot(inv_attr_plots_utm$geom, col = 'red', add = T)
 lidR::plot(pc_ctg_lon)
-terra::plot(vol_stp_utm$geom, col = 'red', add = T)
+terra::plot(inv_attr_plots_utm$geom, col = 'red', add = T)
 
 # clip BI plots to the area only covered by leaf-off point clouds
 # leaf-off covers a slightly smaller area than leaf-on
-vol_stp_aoi <- sf::st_intersection(vol_stp_utm, sf::st_as_sf(pc_ctg_loff))
+inv_attr_plots_aoi <- sf::st_intersection(
+  inv_attr_plots_utm, sf::st_as_sf(pc_ctg_loff)
+  )
 
-# keep only the original columns from vol_stp_utm 
+# keep only the original columns from inv_attr_plots_utm 
 # (remove LAScatalog columns)
-original_cols <- names(vol_stp_utm)
-vol_stp_aoi <- vol_stp_aoi[, original_cols]
+original_cols <- names(inv_attr_plots_utm)
+inv_attr_plots_aoi <- inv_attr_plots_aoi[, original_cols]
 
-summary(vol_stp_aoi)
-table(vol_stp_aoi$dominant_leaf_type)
-par(mfrow = c(2,2))
-boxplot(vol_stp_aoi$vol_ha)
-boxplot(vol_stp_aoi$tree_density)
-boxplot(vol_stp_aoi$basal_area_ha)
-boxplot(vol_stp_aoi$dg)
+summary(inv_attr_plots_aoi)
+table(inv_attr_plots_aoi$dominant_leaf_type)
+par(mfrow = c(3,2))
+boxplot(inv_attr_plots_aoi$vol_ha)
+boxplot(inv_attr_plots_aoi$agb_ha)
+boxplot(inv_attr_plots_aoi$tree_density)
+boxplot(inv_attr_plots_aoi$basal_area_ha)
+boxplot(inv_attr_plots_aoi$dg)
 
 # visualize locations of the BI plots
 lidR::plot(pc_ctg_lon, mapview = T, 
            map.type = 'OpenStreetMap',
            alpha.regions = 0) +
   
-  mapview::mapview(vol_stp_aoi, col.regions = 'black', cex = 5)
+  mapview::mapview(inv_attr_plots_aoi, col.regions = 'black', cex = 5)
 
 lidR::plot(pc_ctg_loff, mapview = T, 
            map.type = 'OpenStreetMap',
            alpha.regions = 0) +
   
-  mapview::mapview(vol_stp_aoi, col.regions = 'black', cex = 5)
+  mapview::mapview(inv_attr_plots_aoi, col.regions = 'black', cex = 5)
 
 
 
 # 06: include remeasured RTK-GNSS plots
 #-------------------------------------------------------------------------------
 
-# merge remeasured plots into vol_stp_aoi
-vol_stp_aoi$remeasured <- 'no'
+# merge remeasured plots into inv_attr_plots_aoi
+inv_attr_plots_aoi$remeasured <- 'no'
 
 # identify matching plots based on kspnr column
-# note: vol_stp_aoi has "kspnr", bi_plots_rtk has "KSPNR"
-matching_plots <- vol_stp_aoi$kspnr %in% bi_plots_rtk$KSPNR
+# note: inv_attr_plots_aoi has "kspnr", bi_plots_rtk has "KSPNR"
+matching_plots <- inv_attr_plots_aoi$kspnr %in% bi_plots_rtk$KSPNR
 
 # mark remeasured plots
-vol_stp_aoi$remeasured[matching_plots] <- 'yes'
+inv_attr_plots_aoi$remeasured[matching_plots] <- 'yes'
 
 # for plots that were remeasured,
 # update their geometry with the more accurate RTK positions
@@ -524,8 +537,8 @@ if (any(matching_plots)) {
   rtk_temp$rtk_geometry <- sf::st_geometry(bi_plots_rtk)
   
   # merge RTK geometry data
-  vol_stp_aoi_temp <- merge(
-    vol_stp_aoi, 
+  inv_attr_plots_aoi_temp <- merge(
+    inv_attr_plots_aoi, 
     sf::st_drop_geometry(rtk_temp), 
     by.x = 'kspnr', 
     by.y = 'KSPNR', 
@@ -534,10 +547,10 @@ if (any(matching_plots)) {
   
   # update geometry for remeasured plots
   for (i in which(matching_plots)) {
-    kspnr_val <- vol_stp_aoi$kspnr[i]
+    kspnr_val <- inv_attr_plots_aoi$kspnr[i]
     rtk_row <- which(bi_plots_rtk$KSPNR == kspnr_val)
     if (length(rtk_row) > 0) {
-      sf::st_geometry(vol_stp_aoi)[i] <- sf::st_geometry(bi_plots_rtk)[rtk_row[1]]
+      sf::st_geometry(inv_attr_plots_aoi)[i] <- sf::st_geometry(bi_plots_rtk)[rtk_row[1]]
     }
   }
   
@@ -545,7 +558,7 @@ if (any(matching_plots)) {
   
 } else {
   
-  cat('No matching plots found between vol_stp_aoi and bi_plots_rtk\n')
+  cat('No matching plots found between inv_attr_plots_aoi and bi_plots_rtk\n')
   
 }
 
@@ -580,71 +593,78 @@ extract_plot_heights_chm <- function(catalog, plots, res = 0.5, buffer_radius = 
 
 # extract heights from CHMs of both point cloud catalogs
 cat('Extracting heights from leaf-off point cloud...\n')
-heights_loff <- extract_plot_heights_chm(pc_ctg_loff, vol_stp_aoi)
+heights_loff <- extract_plot_heights_chm(pc_ctg_loff, inv_attr_plots_aoi)
 
 cat("Extracting heights from leaf-on point cloud...\n") 
-heights_lon <- extract_plot_heights_chm(pc_ctg_lon, vol_stp_aoi)
+heights_lon <- extract_plot_heights_chm(pc_ctg_lon, inv_attr_plots_aoi)
 
 # add heights to plots
-vol_stp_aoi$height_loff <- heights_loff
-vol_stp_aoi$height_lon <- heights_lon
+inv_attr_plots_aoi$height_loff <- heights_loff
+inv_attr_plots_aoi$height_lon <- heights_lon
 
 # calculate height difference (leaf-off - leaf-on)
-vol_stp_aoi$height_diff <- vol_stp_aoi$height_loff - vol_stp_aoi$height_lon
+inv_attr_plots_aoi$height_diff <- 
+  inv_attr_plots_aoi$height_loff - inv_attr_plots_aoi$height_lon
 
 # create filter based on height difference threshold
 height_diff_threshold <- -10  
-valid_plots <- is.na(vol_stp_aoi$height_diff) |
-  vol_stp_aoi$height_diff > height_diff_threshold
+valid_plots <- is.na(inv_attr_plots_aoi$height_diff) |
+  inv_attr_plots_aoi$height_diff > height_diff_threshold
 table(valid_plots)
 
 # remove corresponding plots
-vol_stp_aoi_filtered <- vol_stp_aoi[valid_plots, ]
+inv_attr_plots_aoi_filtered <- inv_attr_plots_aoi[valid_plots, ]
 
 
 
-# 07: save BI plots with the GSV per sample plot
+# 07: save BI plots with the forest inventory attributes per sample plot
 #-------------------------------------------------------------------------------
 
 # rds
 out_path <- file.path(processed_data_dir, 'forest_inventory')
 
-if (!file.exists(file.path(out_path, 'vol_stp.RDS'))) {
+if (!file.exists(file.path(out_path, 'inv_attr_plots.RDS'))) {
   
-  vol_stp_aoi_no_geom <- sf::st_drop_geometry(vol_stp_aoi)
-  saveRDS(vol_stp_aoi_no_geom, file = file.path(out_path, 'vol_stp.RDS'))
+  inv_attr_plots_aoi_no_geom <- sf::st_drop_geometry(inv_attr_plots_aoi_filtered)
+  saveRDS(
+    inv_attr_plots_aoi_no_geom, 
+    file = file.path(out_path, 'inv_attr_plots.RDS')
+    )
   
 } else {
   
-  print('File vol_stp.RDS already exists.')
+  print('File inv_attr_plots.RDS already exists.')
   
 }
 
 # txt
-if (!file.exists(file.path(out_path, 'vol_stp.txt'))) {
+if (!file.exists(file.path(out_path, 'inv_attr_plots.txt'))) {
   
-  vol_stp_aoi_no_geom <- sf::st_drop_geometry(vol_stp_aoi)
+  inv_attr_plots_aoi_no_geom <- sf::st_drop_geometry(inv_attr_plots_aoi_filtered)
   write.table(
-    vol_stp_aoi_no_geom, 
-    file = file.path(out_path, 'vol_stp.txt'), 
+    inv_attr_plots_aoi_no_geom, 
+    file = file.path(out_path, 'inv_attr_plots.txt'), 
     sep = ';',
     row.names = F
   )
   
 } else {
   
-  print('File vol_stp.txt already exists.')
+  print('File inv_attr_plots.txt already exists.')
   
 }
 
 # gpkg
-if (!file.exists(file.path(out_path, 'vol_stp.gpkg'))) {
+if (!file.exists(file.path(out_path, 'inv_attr_plots.gpkg'))) {
   
-  sf::st_write(vol_stp_aoi, dsn = file.path(out_path, 'vol_stp.gpkg'))
+  sf::st_write(
+    inv_attr_plots_aoi_filtered,
+    dsn = file.path(out_path, 'inv_attr_plots.gpkg')
+    )
   
 } else {
   
-  print('File vol_stp.gpkg already exists.')
+  print('File inv_attr_plots.gpkg already exists.')
   
 }
 
