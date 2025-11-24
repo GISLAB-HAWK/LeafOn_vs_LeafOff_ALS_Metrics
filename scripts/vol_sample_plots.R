@@ -476,9 +476,9 @@ inv_attr_plots_utm <- sf::st_transform(inv_attr_plots_gk, crs = 25832)
 # quick plot
 par(mfrow = c(1,2))
 lidR::plot(pc_ctg_loff)
-terra::plot(inv_attr_plots_utm$geom, col = 'red', add = T)
+terra::plot(inv_attr_plots_utm$geometry, col = 'red', add = T)
 lidR::plot(pc_ctg_lon)
-terra::plot(inv_attr_plots_utm$geom, col = 'red', add = T)
+terra::plot(inv_attr_plots_utm$geometry, col = 'red', add = T)
 
 # clip BI plots to the area only covered by leaf-off point clouds
 # leaf-off covers a slightly smaller area than leaf-on
@@ -515,7 +515,7 @@ lidR::plot(pc_ctg_loff, mapview = T,
 
 
 
-# 06: include remeasured RTK-GNSS plots
+# 07: include remeasured RTK-GNSS plots
 #-------------------------------------------------------------------------------
 
 # merge remeasured plots into inv_attr_plots_aoi
@@ -528,22 +528,12 @@ matching_plots <- inv_attr_plots_aoi$kspnr %in% bi_plots_rtk$KSPNR
 # mark remeasured plots
 inv_attr_plots_aoi$remeasured[matching_plots] <- 'yes'
 
+# create sf object with non-RTK geometries (without RTK position)
+remeasured_plots_non_rtk <- inv_attr_plots_aoi[matching_plots, ]
+
 # for plots that were remeasured,
 # update their geometry with the more accurate RTK positions
 if (any(matching_plots)) {
-  
-  # create a temporary data frame for merging
-  rtk_temp <- bi_plots_rtk[, c('KSPNR')]
-  rtk_temp$rtk_geometry <- sf::st_geometry(bi_plots_rtk)
-  
-  # merge RTK geometry data
-  inv_attr_plots_aoi_temp <- merge(
-    inv_attr_plots_aoi, 
-    sf::st_drop_geometry(rtk_temp), 
-    by.x = 'kspnr', 
-    by.y = 'KSPNR', 
-    all.x = T
-  )
   
   # update geometry for remeasured plots
   for (i in which(matching_plots)) {
@@ -554,118 +544,208 @@ if (any(matching_plots)) {
     }
   }
   
+  # create sf object with RTK geometries (after RTK update)
+  remeasured_plots_rtk <- inv_attr_plots_aoi[matching_plots, ]
+  
   cat('Updated', sum(matching_plots), 'plots with RTK-GNSS coordinates\n')
+  cat('Created remeasured_plots_non_rtk:', nrow(remeasured_plots_non_rtk), 'plots with original geometries\n')
+  cat('Created remeasured_plots_rtk:', nrow(remeasured_plots_rtk), 'plots with RTK geometries\n')
   
 } else {
   
   cat('No matching plots found between inv_attr_plots_aoi and bi_plots_rtk\n')
+  remeasured_plots_old <- NULL
+  remeasured_plots_new <- NULL
   
 }
 
 
 
-# 07: remove plots based on height differences between leaf-off and leaf-on
+# 08: remove plots based on height differences between leaf-off and leaf-on
 #-------------------------------------------------------------------------------
 
-extract_plot_heights_chm <- function(catalog, plots, res = 0.5, buffer_radius = 13) {
-  
-  # create buffered plots
-  plots_buffered <- sf::st_buffer(plots, dist = buffer_radius)
-  
-  # generate CHM for the area containing all plots
-  chm_opt <- list(res = res, algorithm = lidR::p2r())
-  chm <- lidR::rasterize_canopy(catalog, chm_opt$res, chm_opt$algorithm)
-  
-  # extract mean height within each plot
-  plot_heights <- exactextractr::exact_extract(
-    chm,
-    plots_buffered,
-    fun = 'mean'
+# define path for storing excluded plots
+excluded_plots_file <- file.path(
+  processed_data_dir, 'forest_inventory', 'excluded_plots_height_diff.csv'
   )
+
+# check if we already have the list of plots to exclude
+if (file.exists(excluded_plots_file)) {
   
-  # convert list to vector
-  if (is.list(plot_heights)) {
-    plot_heights <- unlist(plot_heights)
+  cat('Loading previously identified plots to exclude...\n')
+  plots_to_exclude_df <- read.csv(excluded_plots_file, stringsAsFactors = F)
+  plots_to_exclude <- plots_to_exclude_df$kspnr
+  cat('Loaded', length(plots_to_exclude), 'plots to exclude\n')
+  
+} else {
+  
+  cat('Running CHM analysis to identify plots to exclude...\n')
+  
+  extract_plot_heights_chm <- function(
+    
+    catalog, plots, res = 0.5, buffer_radius = 13) {
+    
+    # create buffered plots
+    plots_buffered <- sf::st_buffer(plots, dist = buffer_radius)
+    
+    # generate CHM for the area containing all plots
+    chm_opt <- list(res = res, algorithm = lidR::p2r())
+    chm <- lidR::rasterize_canopy(catalog, chm_opt$res, chm_opt$algorithm)
+    
+    # extract mean height within each plot
+    plot_heights <- exactextractr::exact_extract(
+      chm,
+      plots_buffered,
+      fun = 'mean'
+    )
+    
+    # convert list to vector
+    if (is.list(plot_heights)) {
+      plot_heights <- unlist(plot_heights)
+    }
+    
+    return(plot_heights)
   }
   
-  return(plot_heights)
+  # extract heights from CHMs of both point cloud catalogs
+  cat('Extracting heights from leaf-off point cloud...\n')
+  heights_loff <- extract_plot_heights_chm(pc_ctg_loff, inv_attr_plots_aoi)
+  
+  cat('Extracting heights from leaf-on point cloud...\n') 
+  heights_lon <- extract_plot_heights_chm(pc_ctg_lon, inv_attr_plots_aoi)
+  
+  # add heights to plots
+  inv_attr_plots_aoi$height_loff <- heights_loff
+  inv_attr_plots_aoi$height_lon <- heights_lon
+  
+  # calculate height difference (leaf-off - leaf-on)
+  inv_attr_plots_aoi$height_diff <- 
+    inv_attr_plots_aoi$height_loff - inv_attr_plots_aoi$height_lon
+  
+  # create filter based on height difference threshold
+  height_diff_threshold <- -10  
+  valid_plots <- is.na(inv_attr_plots_aoi$height_diff) |
+    inv_attr_plots_aoi$height_diff > height_diff_threshold
+  table(valid_plots)
+  
+  # store the kspnr of plots to exclude
+  plots_to_exclude <- inv_attr_plots_aoi$kspnr[!valid_plots]
+  
+  # save for future use
+  plots_to_exclude_df <- data.frame(kspnr = plots_to_exclude)
+  write.csv(plots_to_exclude_df, excluded_plots_file, row.names = F)
+  cat('Saved', length(plots_to_exclude), 'plots to exclude to', excluded_plots_file, '\n')
+  
+  # save non-filtered dataset
+  sf::st_write(
+    inv_attr_plots_aoi,
+    file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots_non_filtered.gpkg')
+    )
+  
 }
 
-# extract heights from CHMs of both point cloud catalogs
-cat('Extracting heights from leaf-off point cloud...\n')
-heights_loff <- extract_plot_heights_chm(pc_ctg_loff, inv_attr_plots_aoi)
+# apply the exclusion filter
+valid_plots <- !inv_attr_plots_aoi$kspnr %in% plots_to_exclude
 
-cat("Extracting heights from leaf-on point cloud...\n") 
-heights_lon <- extract_plot_heights_chm(pc_ctg_lon, inv_attr_plots_aoi)
-
-# add heights to plots
-inv_attr_plots_aoi$height_loff <- heights_loff
-inv_attr_plots_aoi$height_lon <- heights_lon
-
-# calculate height difference (leaf-off - leaf-on)
-inv_attr_plots_aoi$height_diff <- 
-  inv_attr_plots_aoi$height_loff - inv_attr_plots_aoi$height_lon
-
-# create filter based on height difference threshold
-height_diff_threshold <- -10  
-valid_plots <- is.na(inv_attr_plots_aoi$height_diff) |
-  inv_attr_plots_aoi$height_diff > height_diff_threshold
-table(valid_plots)
-
-# remove corresponding plots
+# filter the main dataset
 inv_attr_plots_aoi_filtered <- inv_attr_plots_aoi[valid_plots, ]
 
+# filter remeasured plots
+if (!is.null(remeasured_plots_non_rtk) && !is.null(remeasured_plots_rtk)) {
+  remeasured_plots_non_rtk_filtered <- remeasured_plots_non_rtk[
+    !remeasured_plots_non_rtk$kspnr %in% plots_to_exclude, 
+  ]
+  remeasured_plots_rtk_filtered <- remeasured_plots_rtk[
+    !remeasured_plots_rtk$kspnr %in% plots_to_exclude, 
+  ]
+  
+  cat('Filtered datasets:\n')
+  cat('Main plots:', nrow(inv_attr_plots_aoi_filtered), '/', nrow(inv_attr_plots_aoi), '\n')
+  cat('Remeasured (non-RTK):', nrow(remeasured_plots_non_rtk_filtered), '/', nrow(remeasured_plots_non_rtk), '\n')
+  cat('Remeasured (RTK):', nrow(remeasured_plots_rtk_filtered), '/', nrow(remeasured_plots_rtk), '\n')
+  
+}
 
 
-# 07: save BI plots with the forest inventory attributes per sample plot
+
+# 09: save BI plots with the forest inventory attributes per sample plot
 #-------------------------------------------------------------------------------
 
-# rds
 out_path <- file.path(processed_data_dir, 'forest_inventory')
 
-if (!file.exists(file.path(out_path, 'inv_attr_plots.RDS'))) {
-  
-  inv_attr_plots_aoi_no_geom <- sf::st_drop_geometry(inv_attr_plots_aoi_filtered)
-  saveRDS(
-    inv_attr_plots_aoi_no_geom, 
-    file = file.path(out_path, 'inv_attr_plots.RDS')
-    )
-  
-} else {
-  
-  print('File inv_attr_plots.RDS already exists.')
-  
-}
-
-# txt
-if (!file.exists(file.path(out_path, 'inv_attr_plots.txt'))) {
-  
-  inv_attr_plots_aoi_no_geom <- sf::st_drop_geometry(inv_attr_plots_aoi_filtered)
-  write.table(
-    inv_attr_plots_aoi_no_geom, 
-    file = file.path(out_path, 'inv_attr_plots.txt'), 
-    sep = ';',
-    row.names = F
+# define file formats and corresponding save functions
+file_formats <- list(
+  rds = list(
+    ext = '.RDS',
+    save_func = saveRDS
+  ),
+  txt = list(
+    ext = '.txt',
+    save_func = function(data, file) 
+      write.table(data, file, sep = '\t', row.names = F)
+  ),
+  gpkg = list(
+    ext = '.gpkg',
+    save_func = function(data, file) 
+      sf::st_write(data, file, delete_dsn = T, quiet = T)
   )
+)
+
+# define datasets to save
+datasets <- list(
+  list(
+    name = 'inv_attr_plots',
+    data = inv_attr_plots_aoi_filtered,
+    drop_geom = T
+  ),
+  list(
+    name = 'inv_attr_plots_non_rtk',
+    data = remeasured_plots_non_rtk_filtered,
+    drop_geom = T
+  ),
+  list(
+    name = 'inv_attr_plots_rtk',
+    data = remeasured_plots_rtk_filtered,
+    drop_geom = T
+  )
+)
+
+# loop through each file format
+for (format_name in names(file_formats)) {
   
-} else {
+  format_info <- file_formats[[format_name]]
   
-  print('File inv_attr_plots.txt already exists.')
+  # check if all files exist for this format
+  all_files_exist <- all(sapply(datasets, function(ds) {
+    file.exists(file.path(out_path, paste0(ds$name, format_info$ext)))
+  }))
+  
+  if (!all_files_exist) {
+    
+    cat('Saving files in', format_name, 'format...\n')
+    
+    # save each dataset
+    for (ds in datasets) {
+      
+      file_path <- file.path(out_path, paste0(ds$name, format_info$ext))
+      
+      # prepare data based on format
+      if (format_name %in% c('rds', 'txt') && ds$drop_geom) {
+        data_to_save <- sf::st_drop_geometry(ds$data)
+      } else {
+        data_to_save <- ds$data
+      }
+      
+      # save using appropriate function
+      format_info$save_func(data_to_save, file_path)
+      cat('  Saved:', basename(file_path), '\n')
+      
+    }
+    
+  } else {
+    
+    cat('All', format_name, 'files already exist. Skipping.\n')
+    
+  }
   
 }
-
-# gpkg
-if (!file.exists(file.path(out_path, 'inv_attr_plots.gpkg'))) {
-  
-  sf::st_write(
-    inv_attr_plots_aoi_filtered,
-    dsn = file.path(out_path, 'inv_attr_plots.gpkg')
-    )
-  
-} else {
-  
-  print('File inv_attr_plots.gpkg already exists.')
-  
-}
-
-
