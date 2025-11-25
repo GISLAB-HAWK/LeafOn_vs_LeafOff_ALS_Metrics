@@ -1,13 +1,15 @@
 #-------------------------------------------------------------------------------
-# Name:         vol_sample_plots.R
+# Name:         inv_attr_plots.R
 # Description:  Calculation of forest attributes in inventory plots
 #               (Betriebsionventur (BI) Lower Saxony).
-#               Inventory data is first pre-processed and then single tree volumes
-#               are calculated. These tree volumes are aggregated per sample plot
-#               to obtain the growing stock volume (GSV) [m³/ha]. Other attributes
-#               which are calculated per sample plot include tree density [n/ha], 
-#               basal area [m³/ha], and quadratic mean diameter (QMD) [cm].
-#               The final plots with the calculated forest attributes are clipped
+#               Inventory data is first pre-processed and then volume and 
+#               above ground biomass (AGB) are calculated for individual trees. 
+#               The tree volumes and AGB are aggregated per sample plot to obtain
+#               the growing stock volume (GSV) [m³/ha] and AGB [t/ha].
+#               Other attributes which are calculated per sample plot include
+#               tree density [n/ha], basal area [m³/ha], 
+#               and quadratic mean diameter (QMD) [cm].
+#               The plots with the calculated forest attributes are clipped
 #               to the area of interest (AOI), which is the area covered by both
 #               leaf-off and leaf-on airborne laser scanning (ALS) datasets.
 #               Some plots were were remeasured with RTK-GNSS. Where available,
@@ -17,6 +19,8 @@
 #               but rather to treefall (harvest, natural disturbance), are removed.
 # Author:       Christoph Fischer, Georgia Reeves, Florian Franz
 # Contact:      christoph.fischer@nw-fva.de
+#               georgia.reeves@nw-fva.de
+#               florian.franz@nw-fva.de
 #-------------------------------------------------------------------------------
 
 
@@ -303,6 +307,7 @@ vor$volC <- NA
 cop <- vor[-(1:dim(vor)[1]),]
 
 # calculation of volumes with tg_volume
+# https://github.com/rnuske/TreeGrOSSinR
 # correction of negative volumes with GAM
 # to avoid them
 d = seq(7, 99, by = 2)
@@ -385,6 +390,7 @@ agb$ba1 <- ifelse(agb$ba == 110 | agb$ba == 111 | agb$ba == 112, 17,
 agb$agb <- NA
 
 # calculation of AGB with rBDAT::getBiomass
+# https://gitlab.com/vochr/rbdat
 for(i in unique(agb$ba1)){
   
   print(i)
