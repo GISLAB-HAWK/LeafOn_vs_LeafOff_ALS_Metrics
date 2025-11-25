@@ -1,13 +1,15 @@
 #-------------------------------------------------------------------------------
-# Name:         vol_sample_plots.R
+# Name:         inv_attr_plots.R
 # Description:  Calculation of forest attributes in inventory plots
 #               (Betriebsionventur (BI) Lower Saxony).
-#               Inventory data is first pre-processed and then single tree volumes
-#               are calculated. These tree volumes are aggregated per sample plot
-#               to obtain the growing stock volume (GSV) [m³/ha]. Other attributes
-#               which are calculated per sample plot include tree density [n/ha], 
-#               basal area [m³/ha], and quadratic mean diameter (QMD) [cm].
-#               The final plots with the calculated forest attributes are clipped
+#               Inventory data is first pre-processed and then volume and 
+#               above ground biomass (AGB) are calculated for individual trees. 
+#               The tree volumes and AGB are aggregated per sample plot to obtain
+#               the growing stock volume (GSV) [m³/ha] and AGB [t/ha].
+#               Other attributes which are calculated per sample plot include
+#               tree density [n/ha], basal area [m³/ha], 
+#               and quadratic mean diameter (QMD) [cm].
+#               The plots with the calculated forest attributes are clipped
 #               to the area of interest (AOI), which is the area covered by both
 #               leaf-off and leaf-on airborne laser scanning (ALS) datasets.
 #               Some plots were were remeasured with RTK-GNSS. Where available,
@@ -17,6 +19,8 @@
 #               but rather to treefall (harvest, natural disturbance), are removed.
 # Author:       Christoph Fischer, Georgia Reeves, Florian Franz
 # Contact:      christoph.fischer@nw-fva.de
+#               georgia.reeves@nw-fva.de
+#               florian.franz@nw-fva.de
 #-------------------------------------------------------------------------------
 
 
@@ -39,23 +43,23 @@ bi_data <- list.files(bi_path)
 bi_points <- read.table(
   file.path(bi_path, 'tblDatPh2_ZE.txt'),
   header = T, sep = ';'
-  )
+)
 
 bi_trees <- read.table(
   file.path(bi_path, 'tblDatPh2_Vorr_ZE.txt'),
   header = T, sep = ';'
-  )
+)
 
 # select desired forestry offices (Solling --> Neuhaus, Dassel)
 bi_points <- bi_points[
   bi_points$DatOrga_Key == '268-2022-002' | 
     bi_points$DatOrga_Key == '254-2022-002',
-  ]
+]
 
 bi_trees <- bi_trees[
   bi_trees$DatOrga_Key == '268-2022-002' |
     bi_trees$DatOrga_Key == '254-2022-002',
-  ]
+]
 
 head(bi_points)
 head(bi_trees)
@@ -123,7 +127,7 @@ bi_trees$bhd <- ifelse(
   bi_trees$bhdklup > 0,
   (0.5 * (bi_trees$bhd + bi_trees$bhdklup)) / 10,
   bi_trees$bhd / 10
-  )
+)
 
 # separate data:
 # trees with diameter at deviating measurement height
@@ -160,14 +164,14 @@ bi_points$hang_rad <- (pi / 180) * bi_points$hang
 bi_points_trees <- merge(
   bi_trees, bi_points[,c("key", "kspnr", "abt", "hang_rad", "rw", "hw")],
   by = c("key", "kspnr")
-  )
+)
 
 # r_plane = r_slope * cos(slope_rad)
 bi_points_trees$nha <- ifelse(
   bi_points_trees$bhd < 30, 
   10000 / (pi * 6**2 * cos(bi_points_trees$hang_rad)),
   10000 / (pi * 13**2 * cos(bi_points_trees$hang_rad))
-  )
+)
 
 ## add heights
 
@@ -185,7 +189,7 @@ dat <- input_ehk(
   bs = bi_points_trees$bestschicht, bhd = bi_points_trees$bhd,
   hoe = bi_points_trees$hoehe, nha = bi_points_trees$nha,
   bagr = bi_points_trees$bagr
-  )
+)
 
 head(dat)
 
@@ -199,7 +203,7 @@ m <- scam::scam(
   hoe ~ s(bhd, bs = 'mpi'),
   data = dat, 
   family = Gamma(link = 'log')
-  )
+)
 
 nd <- data.frame('bhd' = floor(min(dat$bhd)):ceiling(max(dat$bhd)))
 nd$hoe <- predict(m, newdata = nd, type = 'response')
@@ -220,8 +224,8 @@ for (x in seq(10, 110, by = 10)) {
       'bhd' = x - (9 * d / max(d)), 
       'hoe' = 1:60, 
       'x' = x
-      )
     )
+  )
 }
 
 p1 <- p + 
@@ -230,7 +234,7 @@ p1 <- p +
     data = data.frame('bhd' = seq(10, 110, by = 10)), 
     aes(xintercept = bhd, color = factor(bhd)), show.legend = F, 
     linetype = 2
-    )
+  )
 
 v <- 1/m$sig2
 dat$p <- stats::pgamma(q = dat$hoe, shape = (fitted(m)^2)/v, scale = v/fitted(m))
@@ -257,7 +261,7 @@ dat <- input_ehk(
   bs = bi_points_trees$bestschicht, bhd = bi_points_trees$bhd,
   hoe = bi_points_trees$hoehe, nha = bi_points_trees$nha,
   bagr = bi_points_trees$bagr
-  )
+)
 
 dat2 <- dat[dat$hoe == 0,]
 
@@ -274,11 +278,11 @@ plot(dat2$bhd, dat2$hoe_mod)
 
 # merge modeled heights with original table
 bi_points_trees <- merge(
-  bi_points_trees,#
+  bi_points_trees,
   dat2[,c("id", "bnr", "hoe_mod")],
   by.x = c("id2","id"), 
   by.y = c("id", "bnr")
-  )
+)
 
 # remove unneeded data frames
 rm(dat2, dat)
@@ -303,6 +307,7 @@ vor$volC <- NA
 cop <- vor[-(1:dim(vor)[1]),]
 
 # calculation of volumes with tg_volume
+# https://github.com/rnuske/TreeGrOSSinR
 # correction of negative volumes with GAM
 # to avoid them
 d = seq(7, 99, by = 2)
@@ -318,7 +323,7 @@ for(i in unique(vor$ba1)){
   
   data$vol <- TreeGrOSSinR::tg_volumen(ba=i, bhd=data$d, h=data$h, info = F)
   m <-mgcv::gam(vol ~ t2(d, h, k = 10), data = data, family = gaussian(link = 'log'))
-
+  
   vor2$volC <- predict(m, newdata=data.frame(d=vor2$bhd, h=vor2$hoe_mod), type = 'response')
   
   cop <- rbind(cop, vor2)
@@ -339,7 +344,72 @@ plot(bi_points_trees$bhd, bi_points_trees$vol)
 
 
 
-# 04: aggregate volume per sample plot
+# 04: calculate individual tree AGB
+#-------------------------------------------------------------------------------
+
+agb <- bi_points_trees
+
+# recode tree species before applying rBDAT
+agb$ba1 <- ifelse(agb$ba == 110 | agb$ba == 111 | agb$ba == 112, 17,
+           ifelse(agb$ba == 113, 18,
+           ifelse(agb$ba == 211, 15,
+           ifelse(agb$ba == 221, 16,
+           ifelse(agb$ba == 311, 21,
+           ifelse(agb$ba == 320, 22,
+           ifelse(agb$ba == 321, 23,
+           ifelse(agb$ba == 322, 24,
+           ifelse(agb$ba == 323, 25,
+           ifelse(agb$ba == 330 | agb$ba == 331 | agb$ba == 332, 30,
+           ifelse(agb$ba == 341 | agb$ba == 342, 27,
+           ifelse(agb$ba == 351, 31,
+           ifelse(agb$ba == 352 | agb$ba == 442, 33,
+           ifelse(agb$ba == 353 | agb$ba == 355, 35,
+           ifelse(agb$ba == 354 | agb$ba == 452, 29,
+           ifelse(agb$ba == 357, 32,
+           ifelse(agb$ba == 410 | agb$ba == 411 | agb$ba == 412 | agb$ba == 414, 26,
+           ifelse(agb$ba == 420 | agb$ba == 421 | agb$ba == 422, 28,
+           ifelse(agb$ba == 430 | agb$ba == 431, 19,
+           ifelse(agb$ba == 441, 34,
+           ifelse(agb$ba == 451, 36,
+           ifelse(agb$ba == 511 | agb$ba == 513 | agb$ba == 551, 1,
+           ifelse(agb$ba == 512, 2,
+           ifelse(agb$ba == 521, 3,
+           ifelse(agb$ba == 523, 4,
+           ifelse(agb$ba == 541, 13,
+           ifelse(agb$ba == 542, 12,
+           ifelse(agb$ba == 611, 8,
+           ifelse(agb$ba == 711, 5,
+           ifelse(agb$ba == 712, 6,
+           ifelse(agb$ba == 731, 7,
+           ifelse(agb$ba == 810, 9,
+           ifelse(agb$ba == 811, 10,
+           ifelse(agb$ba == 812, 11, vor$ba)
+           )))))))))))))))))))))))))))))))))
+
+# add empty column
+agb$agb <- NA
+
+# calculation of AGB with rBDAT::getBiomass
+# https://gitlab.com/vochr/rbdat
+for(i in unique(agb$ba1)){
+  
+  print(i)
+  
+  agb$agb <- rBDAT::getBiomass(
+    agb,
+    mapping = c('ba1' = 'spp', 'bhd' = 'D1', 'hoe_mod' = 'H')
+  )
+  
+}
+
+agb$ba1 <- NULL
+bi_points_trees <- agb
+summary(agb)
+plot(agb$bhd, agb$agb)
+
+
+
+# 05: aggregate volume and AGB per sample plot
 #-------------------------------------------------------------------------------
 
 # add column of leaf type
@@ -350,16 +420,19 @@ bi_points_trees$leaf_type <- ifelse(
   'coniferous'
 )
 
-# group sums of volume, tree density, basal area, and QMD
-# assign dominant leaf type to each plot
+# group sums of volume, AGB,
+# and other forest inventory attributes like
+# tree density, basal area, and QMD
 bi_points_trees <- bi_points_trees %>%
   dplyr::group_by(key, kspnr) %>%
   dplyr::mutate(
     vol_ha = sum(vol * nha),
+    agb_ha = sum(agb * nha) / 1000,
     tree_density = mean(nha),
     basal_area_tree = (pi / 4) * (bhd / 100)^2,
     basal_area_ha = sum(basal_area_tree * nha, na.rm = T),
     dg = sqrt(sum(bhd^2 * nha, na.rm = T) / sum(nha, na.rm = T)),
+    # assign dominant leaf type to each plot
     total_deciduous = sum(dplyr::if_else(
       leaf_type == 'deciduous', nha, 0, missing = 0), na.rm = T),
     total_coniferous = sum(dplyr::if_else(
@@ -372,216 +445,313 @@ bi_points_trees <- bi_points_trees %>%
   dplyr::ungroup()
 
 # extract unique forest inventory variables for all sample plots
-vol_stp <- unique(
-  bi_points_trees[,c("key", "kspnr", "abt", "rw", "hw", "vol_ha", "tree_density",
-                     "basal_area_ha", "dg", "dominant_leaf_type")])
+inv_attr_plots <- unique(
+  bi_points_trees[,c("key", "kspnr", "abt", "rw", "hw", "vol_ha", "agb_ha",
+                     "tree_density", "basal_area_ha", "dg", "dominant_leaf_type")])
 
-vol_stp <- merge(bi_points[,c("key", "kspnr", "abt", "rw", "hw")], 
-                 vol_stp, by=c("key", "kspnr", "abt", "rw", "hw"), 
-                 all.x=T)
+#vol_stp <- merge(bi_points[,c("key", "kspnr", "abt", "rw", "hw")], 
+#                 vol_stp, by=c("key", "kspnr", "abt", "rw", "hw"), 
+#                 all.x=T)
 
-vol_stp[is.na(vol_stp)] <- 0
+inv_attr_plots[is.na(inv_attr_plots)] <- 0
 
-head(vol_stp)
-summary(vol_stp)
-boxplot(vol_stp$vol_ha)
-boxplot(vol_stp$tree_density)
-boxplot(vol_stp$basal_area_ha)
-boxplot(vol_stp$dg)
+head(inv_attr_plots)
+summary(inv_attr_plots)
+
+boxplot(inv_attr_plots$vol_ha)
+boxplot(inv_attr_plots$agb_ha)
+boxplot(inv_attr_plots$tree_density)
+boxplot(inv_attr_plots$basal_area_ha)
+boxplot(inv_attr_plots$dg)
+
+hist(inv_attr_plots$vol_ha)
+hist(inv_attr_plots$agb_ha)
 
 
-# 05: clip sample plots to the AOI
+# 06: clip sample plots to the AOI
 #-------------------------------------------------------------------------------
 
 # conversion to sf object (DHDN / 3-degree Gauss-Kruger zone 3)
-vol_stp_gk <- sf::st_as_sf(vol_stp, coords = c('rw', 'hw'), crs = 31467)
+inv_attr_plots_gk <- sf::st_as_sf(
+  inv_attr_plots, coords = c('rw', 'hw'), crs = 31467
+  )
 
 # transformation to ETRS89 / UTM zone 32N
-vol_stp_utm <- sf::st_transform(vol_stp_gk, crs = 25832)
+inv_attr_plots_utm <- sf::st_transform(inv_attr_plots_gk, crs = 25832)
 
 # quick plot
 par(mfrow = c(1,2))
 lidR::plot(pc_ctg_loff)
-terra::plot(vol_stp_utm$geom, col = 'red', add = T)
+terra::plot(inv_attr_plots_utm$geometry, col = 'red', add = T)
 lidR::plot(pc_ctg_lon)
-terra::plot(vol_stp_utm$geom, col = 'red', add = T)
+terra::plot(inv_attr_plots_utm$geometry, col = 'red', add = T)
 
 # clip BI plots to the area only covered by leaf-off point clouds
 # leaf-off covers a slightly smaller area than leaf-on
-vol_stp_aoi <- sf::st_intersection(vol_stp_utm, sf::st_as_sf(pc_ctg_loff))
+inv_attr_plots_aoi <- sf::st_intersection(
+  inv_attr_plots_utm, sf::st_as_sf(pc_ctg_loff)
+  )
 
-# keep only the original columns from vol_stp_utm 
+# keep only the original columns from inv_attr_plots_utm 
 # (remove LAScatalog columns)
-original_cols <- names(vol_stp_utm)
-vol_stp_aoi <- vol_stp_aoi[, original_cols]
+original_cols <- names(inv_attr_plots_utm)
+inv_attr_plots_aoi <- inv_attr_plots_aoi[, original_cols]
 
-summary(vol_stp_aoi)
-table(vol_stp_aoi$dominant_leaf_type)
-par(mfrow = c(2,2))
-boxplot(vol_stp_aoi$vol_ha)
-boxplot(vol_stp_aoi$tree_density)
-boxplot(vol_stp_aoi$basal_area_ha)
-boxplot(vol_stp_aoi$dg)
+summary(inv_attr_plots_aoi)
+table(inv_attr_plots_aoi$dominant_leaf_type)
+par(mfrow = c(3,2))
+boxplot(inv_attr_plots_aoi$vol_ha)
+boxplot(inv_attr_plots_aoi$agb_ha)
+boxplot(inv_attr_plots_aoi$tree_density)
+boxplot(inv_attr_plots_aoi$basal_area_ha)
+boxplot(inv_attr_plots_aoi$dg)
 
 # visualize locations of the BI plots
 lidR::plot(pc_ctg_lon, mapview = T, 
            map.type = 'OpenStreetMap',
            alpha.regions = 0) +
   
-  mapview::mapview(vol_stp_aoi, col.regions = 'black', cex = 5)
+  mapview::mapview(inv_attr_plots_aoi, col.regions = 'black', cex = 5)
 
 lidR::plot(pc_ctg_loff, mapview = T, 
            map.type = 'OpenStreetMap',
            alpha.regions = 0) +
   
-  mapview::mapview(vol_stp_aoi, col.regions = 'black', cex = 5)
+  mapview::mapview(inv_attr_plots_aoi, col.regions = 'black', cex = 5)
 
 
 
-# 06: include remeasured RTK-GNSS plots
+# 07: include remeasured RTK-GNSS plots
 #-------------------------------------------------------------------------------
 
-# merge remeasured plots into vol_stp_aoi
-vol_stp_aoi$remeasured <- 'no'
+# merge remeasured plots into inv_attr_plots_aoi
+inv_attr_plots_aoi$remeasured <- 'no'
 
 # identify matching plots based on kspnr column
-# note: vol_stp_aoi has "kspnr", bi_plots_rtk has "KSPNR"
-matching_plots <- vol_stp_aoi$kspnr %in% bi_plots_rtk$KSPNR
+# note: inv_attr_plots_aoi has "kspnr", bi_plots_rtk has "KSPNR"
+matching_plots <- inv_attr_plots_aoi$kspnr %in% bi_plots_rtk$KSPNR
 
 # mark remeasured plots
-vol_stp_aoi$remeasured[matching_plots] <- 'yes'
+inv_attr_plots_aoi$remeasured[matching_plots] <- 'yes'
+
+# create sf object with non-RTK geometries (without RTK position)
+remeasured_plots_non_rtk <- inv_attr_plots_aoi[matching_plots, ]
 
 # for plots that were remeasured,
 # update their geometry with the more accurate RTK positions
 if (any(matching_plots)) {
   
-  # create a temporary data frame for merging
-  rtk_temp <- bi_plots_rtk[, c('KSPNR')]
-  rtk_temp$rtk_geometry <- sf::st_geometry(bi_plots_rtk)
-  
-  # merge RTK geometry data
-  vol_stp_aoi_temp <- merge(
-    vol_stp_aoi, 
-    sf::st_drop_geometry(rtk_temp), 
-    by.x = 'kspnr', 
-    by.y = 'KSPNR', 
-    all.x = T
-    )
-  
   # update geometry for remeasured plots
   for (i in which(matching_plots)) {
-    kspnr_val <- vol_stp_aoi$kspnr[i]
+    kspnr_val <- inv_attr_plots_aoi$kspnr[i]
     rtk_row <- which(bi_plots_rtk$KSPNR == kspnr_val)
     if (length(rtk_row) > 0) {
-      sf::st_geometry(vol_stp_aoi)[i] <- sf::st_geometry(bi_plots_rtk)[rtk_row[1]]
+      sf::st_geometry(inv_attr_plots_aoi)[i] <- sf::st_geometry(bi_plots_rtk)[rtk_row[1]]
     }
   }
   
+  # create sf object with RTK geometries (after RTK update)
+  remeasured_plots_rtk <- inv_attr_plots_aoi[matching_plots, ]
+  
   cat('Updated', sum(matching_plots), 'plots with RTK-GNSS coordinates\n')
+  cat('Created remeasured_plots_non_rtk:', nrow(remeasured_plots_non_rtk), 'plots with original geometries\n')
+  cat('Created remeasured_plots_rtk:', nrow(remeasured_plots_rtk), 'plots with RTK geometries\n')
   
 } else {
   
-  cat('No matching plots found between vol_stp_aoi and bi_plots_rtk\n')
+  cat('No matching plots found between inv_attr_plots_aoi and bi_plots_rtk\n')
+  remeasured_plots_old <- NULL
+  remeasured_plots_new <- NULL
   
 }
 
 
 
-# 07: remove plots based on height differences between leaf-off and leaf-on
+# 08: remove plots based on height differences between leaf-off and leaf-on
 #-------------------------------------------------------------------------------
 
-extract_plot_heights_chm <- function(catalog, plots, res = 0.5, buffer_radius = 13) {
-  
-  # create buffered plots
-  plots_buffered <- sf::st_buffer(plots, dist = buffer_radius)
-  
-  # generate CHM for the area containing all plots
-  chm_opt <- list(res = res, algorithm = lidR::p2r())
-  chm <- lidR::rasterize_canopy(catalog, chm_opt$res, chm_opt$algorithm)
-  
-  # extract mean height within each plot
-  plot_heights <- exactextractr::exact_extract(
-    chm,
-    plots_buffered,
-    fun = 'mean'
+# define path for storing excluded plots
+excluded_plots_file <- file.path(
+  processed_data_dir, 'forest_inventory', 'excluded_plots_height_diff.csv'
   )
+
+# check if we already have the list of plots to exclude
+if (file.exists(excluded_plots_file)) {
   
-  # convert list to vector
-  if (is.list(plot_heights)) {
-    plot_heights <- unlist(plot_heights)
+  cat('Loading previously identified plots to exclude...\n')
+  plots_to_exclude_df <- read.csv(excluded_plots_file, stringsAsFactors = F)
+  plots_to_exclude <- plots_to_exclude_df$kspnr
+  cat('Loaded', length(plots_to_exclude), 'plots to exclude\n')
+  
+} else {
+  
+  cat('Running CHM analysis to identify plots to exclude...\n')
+  
+  extract_plot_heights_chm <- function(
+    
+    catalog, plots, res = 0.5, buffer_radius = 13) {
+    
+    # create buffered plots
+    plots_buffered <- sf::st_buffer(plots, dist = buffer_radius)
+    
+    # generate CHM for the area containing all plots
+    chm_opt <- list(res = res, algorithm = lidR::p2r())
+    chm <- lidR::rasterize_canopy(catalog, chm_opt$res, chm_opt$algorithm)
+    
+    # extract mean height within each plot
+    plot_heights <- exactextractr::exact_extract(
+      chm,
+      plots_buffered,
+      fun = 'mean'
+    )
+    
+    # convert list to vector
+    if (is.list(plot_heights)) {
+      plot_heights <- unlist(plot_heights)
+    }
+    
+    return(plot_heights)
   }
   
-  return(plot_heights)
-}
-
-# extract heights from CHMs of both point cloud catalogs
-cat('Extracting heights from leaf-off point cloud...\n')
-heights_loff <- extract_plot_heights_chm(pc_ctg_loff, vol_stp_aoi)
-
-cat("Extracting heights from leaf-on point cloud...\n") 
-heights_lon <- extract_plot_heights_chm(pc_ctg_lon, vol_stp_aoi)
-
-# add heights to plots
-vol_stp_aoi$height_loff <- heights_loff
-vol_stp_aoi$height_lon <- heights_lon
-
-# calculate height difference (leaf-off - leaf-on)
-vol_stp_aoi$height_diff <- vol_stp_aoi$height_loff - vol_stp_aoi$height_lon
-
-# create filter based on height difference threshold
-height_diff_threshold <- -10  
-valid_plots <- is.na(vol_stp_aoi$height_diff) |
-  vol_stp_aoi$height_diff > height_diff_threshold
-table(valid_plots)
-
-# remove corresponding plots
-vol_stp_aoi_filtered <- vol_stp_aoi[valid_plots, ]
-
-
-
-# 07: save BI plots with the GSV per sample plot
-#-------------------------------------------------------------------------------
-
-# rds
-out_path <- file.path(processed_data_dir, 'forest_inventory')
-
-if (!file.exists(file.path(out_path, 'vol_stp.RDS'))) {
+  # extract heights from CHMs of both point cloud catalogs
+  cat('Extracting heights from leaf-off point cloud...\n')
+  heights_loff <- extract_plot_heights_chm(pc_ctg_loff, inv_attr_plots_aoi)
   
-  vol_stp_aoi_no_geom <- sf::st_drop_geometry(vol_stp_aoi)
-  saveRDS(vol_stp_aoi_no_geom, file = file.path(out_path, 'vol_stp.RDS'))
+  cat('Extracting heights from leaf-on point cloud...\n') 
+  heights_lon <- extract_plot_heights_chm(pc_ctg_lon, inv_attr_plots_aoi)
   
-} else {
+  # add heights to plots
+  inv_attr_plots_aoi$height_loff <- heights_loff
+  inv_attr_plots_aoi$height_lon <- heights_lon
   
-  print('File vol_stp.RDS already exists.')
+  # calculate height difference (leaf-off - leaf-on)
+  inv_attr_plots_aoi$height_diff <- 
+    inv_attr_plots_aoi$height_loff - inv_attr_plots_aoi$height_lon
   
-}
-
-# txt
-if (!file.exists(file.path(out_path, 'vol_stp.txt'))) {
+  # create filter based on height difference threshold
+  height_diff_threshold <- -10  
+  valid_plots <- is.na(inv_attr_plots_aoi$height_diff) |
+    inv_attr_plots_aoi$height_diff > height_diff_threshold
+  table(valid_plots)
   
-  vol_stp_aoi_no_geom <- sf::st_drop_geometry(vol_stp_aoi)
-  write.table(
-    vol_stp_aoi_no_geom, 
-    file = file.path(out_path, 'vol_stp.txt'), 
-    sep = ';',
-    row.names = F
+  # store the kspnr of plots to exclude
+  plots_to_exclude <- inv_attr_plots_aoi$kspnr[!valid_plots]
+  
+  # save for future use
+  plots_to_exclude_df <- data.frame(kspnr = plots_to_exclude)
+  write.csv(plots_to_exclude_df, excluded_plots_file, row.names = F)
+  cat('Saved', length(plots_to_exclude), 'plots to exclude to', excluded_plots_file, '\n')
+  
+  # save non-filtered dataset
+  sf::st_write(
+    inv_attr_plots_aoi,
+    file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots_non_filtered.gpkg')
     )
   
-} else {
+}
+
+# apply the exclusion filter
+valid_plots <- !inv_attr_plots_aoi$kspnr %in% plots_to_exclude
+
+# filter the main dataset
+inv_attr_plots_aoi_filtered <- inv_attr_plots_aoi[valid_plots, ]
+
+# filter remeasured plots
+if (!is.null(remeasured_plots_non_rtk) && !is.null(remeasured_plots_rtk)) {
+  remeasured_plots_non_rtk_filtered <- remeasured_plots_non_rtk[
+    !remeasured_plots_non_rtk$kspnr %in% plots_to_exclude, 
+  ]
+  remeasured_plots_rtk_filtered <- remeasured_plots_rtk[
+    !remeasured_plots_rtk$kspnr %in% plots_to_exclude, 
+  ]
   
-  print('File vol_stp.txt already exists.')
+  cat('Filtered datasets:\n')
+  cat('Main plots:', nrow(inv_attr_plots_aoi_filtered), '/', nrow(inv_attr_plots_aoi), '\n')
+  cat('Remeasured (non-RTK):', nrow(remeasured_plots_non_rtk_filtered), '/', nrow(remeasured_plots_non_rtk), '\n')
+  cat('Remeasured (RTK):', nrow(remeasured_plots_rtk_filtered), '/', nrow(remeasured_plots_rtk), '\n')
   
 }
 
-# gpkg
-if (!file.exists(file.path(out_path, 'vol_stp.gpkg'))) {
+
+
+# 09: save BI plots with the forest inventory attributes per sample plot
+#-------------------------------------------------------------------------------
+
+out_path <- file.path(processed_data_dir, 'forest_inventory')
+
+# define file formats and corresponding save functions
+file_formats <- list(
+  rds = list(
+    ext = '.RDS',
+    save_func = saveRDS
+  ),
+  txt = list(
+    ext = '.txt',
+    save_func = function(data, file) 
+      write.table(data, file, sep = '\t', row.names = F)
+  ),
+  gpkg = list(
+    ext = '.gpkg',
+    save_func = function(data, file) 
+      sf::st_write(data, file, delete_dsn = T, quiet = T)
+  )
+)
+
+# define datasets to save
+datasets <- list(
+  list(
+    name = 'inv_attr_plots',
+    data = inv_attr_plots_aoi_filtered,
+    drop_geom = T
+  ),
+  list(
+    name = 'inv_attr_plots_non_rtk',
+    data = remeasured_plots_non_rtk_filtered,
+    drop_geom = T
+  ),
+  list(
+    name = 'inv_attr_plots_rtk',
+    data = remeasured_plots_rtk_filtered,
+    drop_geom = T
+  )
+)
+
+# loop through each file format
+for (format_name in names(file_formats)) {
   
-  sf::st_write(vol_stp_aoi, dsn = file.path(out_path, 'vol_stp.gpkg'))
+  format_info <- file_formats[[format_name]]
   
-} else {
+  # check if all files exist for this format
+  all_files_exist <- all(sapply(datasets, function(ds) {
+    file.exists(file.path(out_path, paste0(ds$name, format_info$ext)))
+  }))
   
-  print('File vol_stp.gpkg already exists.')
+  if (!all_files_exist) {
+    
+    cat('Saving files in', format_name, 'format...\n')
+    
+    # save each dataset
+    for (ds in datasets) {
+      
+      file_path <- file.path(out_path, paste0(ds$name, format_info$ext))
+      
+      # prepare data based on format
+      if (format_name %in% c('rds', 'txt') && ds$drop_geom) {
+        data_to_save <- sf::st_drop_geometry(ds$data)
+      } else {
+        data_to_save <- ds$data
+      }
+      
+      # save using appropriate function
+      format_info$save_func(data_to_save, file_path)
+      cat('  Saved:', basename(file_path), '\n')
+      
+    }
+    
+  } else {
+    
+    cat('All', format_name, 'files already exist. Skipping.\n')
+    
+  }
   
 }
-
-
