@@ -1,0 +1,4 @@
+project:
+  type: default
+  output-dir: docs
+  execute-dir: project
