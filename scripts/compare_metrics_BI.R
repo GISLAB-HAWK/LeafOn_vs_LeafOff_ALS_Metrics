@@ -15,12 +15,12 @@ library(ggplot2)
 library(ggfortify)
 library(ggpubr)
 
-setwd("R:/AG_Magdon/datensaetze/solling/dobelmann/Repo_LeafOn_vs_LeafOff_ALS")
+setwd("R:/AG_Magdon/datensaetze/solling/dobelmann/")
 
 # files paths 
-loff_df_file <- "data/BI_indices_2024_RTK_harm.csv"
-lon_df_file <-  "data/BI_indices_2023_RTK_harm.csv"
-tree_species_file <- "data/vol_stp_GR.csv"
+loff_df_file <- "leaf-on_leaf-off_data/02_indices/solling24_loff_ppm20_indices_BI.csv"
+lon_df_file <-  "leaf-on_leaf-off_data/02_indices/solling23_lon_ppm20_indices_BI.csv"
+tree_species_file <- "tree_species_data/Georgia/vol_stp_GR.csv"
 
 # read the data 
 loff_df <- read.csv(loff_df_file)#[,-1]
@@ -82,7 +82,7 @@ df_long$variable <- factor(df_long$variable,
 shapiro <- df_long %>%
   group_by(season, variable) %>%
   summarise(
-    shapiro = list(shapiro.test(value)), # using a subsample n = 5000
+    shapiro = list(shapiro.test(value)), 
     .groups = "drop"
   ) %>%
   rowwise() %>%
@@ -97,7 +97,7 @@ print(shapiro, n = 34)
 
 which(shapiro$p.value > 0.05) # lon skewness and SD normally distributed, rest non-normally
 
-# data not normally distribute. using non-parametric wilcoxon-test instead
+# data not normally distributed. using non-parametric wilcoxon-test instead
 wilcox_test <- df_wide %>%
   tidyr::drop_na(leaf_on, leaf_off) %>%   # keep only complete pairs
   group_by(variable) %>%
@@ -136,22 +136,23 @@ s <- ggplot(df_wide_clean, aes(x = leaf_on, y = leaf_off, colour = species)) +
   theme_minimal() +
   scale_color_discrete(na.value = "lightgray") +
   labs(
-    title = "Comparison of Metrices on the plot level",
+    title = "Metric comparison for BI plots ",
+    subtitle = "n = 196, pulse density = 20ppm",
     x = "Leaf-On Value",
     y = "Leaf-Off Value"
   ) +
   theme(
-    legend.text = element_text(size = 16),  
-    axis.title = element_text(size = 18),
-    axis.text = element_text(size = 14),
-    legend.title = element_text(size = 20),      
-    strip.text = element_text(size = 17), 
-    title = element_text(size = 20)
+    legend.text = element_text(size = 14),  
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 18),      
+    strip.text = element_text(size = 15), 
+    title = element_text(size = 18)
   )
 
 
 print(s)
-ggsave("plots/BI_scatterplot.pdf",s,  dpi = 500, width = 15, height = 10)
+ggsave("plots/BI_scatterplot_ppm20.pdf",s,  dpi = 500, width = 15, height = 10)
 
 
 #### violin plot ####
@@ -159,7 +160,8 @@ v <- ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
   geom_violin(trim = FALSE) +
   facet_wrap(~ variable, nrow = 4, ncol = 5, scales = "free_y") +
   theme_minimal() +
-  labs(title = "Metric Comparison Leaf off vs. leaf on",
+  labs(title = "Metric comparison for BI plots ",
+       subtitle = "n = 196, pulse density = 20ppm",
        x = "",
        y = "Value") +
   theme(legend.position = "none") +
@@ -170,7 +172,7 @@ v <- ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
   )
 
 print(v)
-ggsave("plots/BI_violinplot.png", v ,  dpi = 500, width = 12, height = 10)
+ggsave("plots/BI_violinplot_ppm20.pdf", v ,  dpi = 500, width = 12, height = 10)
 
 
 #### density plot ####
@@ -178,7 +180,8 @@ d <- ggplot(df_long, aes(x = value, fill = season)) +
   geom_density(alpha = 0.7) +
   facet_wrap(~ variable, scales = "free", ncol = 5) +
   theme_minimal() +
-  labs(title = "Metric Comparison Leaf off vs. leaf on",
+  labs(title = "Metric comparison for BI plots ",
+       subtitle = "n = 196, pulse density = 20ppm",
        x = "",
        y = "Value") +
   theme(legend.position = "bottom") +
@@ -190,5 +193,5 @@ d <- ggplot(df_long, aes(x = value, fill = season)) +
 
 print(d)
 
-ggsave("plots/BI_densityplot.png", d ,  dpi = 500, width = 12, height = 10)
+ggsave("plots/BI_densityplot_ppm20.pdf", d ,  dpi = 500, width = 12, height = 10)
 
