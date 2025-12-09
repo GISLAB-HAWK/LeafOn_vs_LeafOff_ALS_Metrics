@@ -1,27 +1,21 @@
-#-------------------------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------------------------------------------
 # Name:         inv_attr_plots.R
-# Description:  Calculation of forest attributes in inventory plots
-#               (Betriebsionventur (BI) Lower Saxony).
-#               Inventory data is first pre-processed and then volume and 
-#               above ground biomass (AGB) are calculated for individual trees. 
-#               The tree volumes and AGB are aggregated per sample plot to obtain
-#               the growing stock volume (GSV) [m³/ha] and AGB [t/ha].
-#               Other attributes which are calculated per sample plot include
-#               tree density [n/ha], basal area [m³/ha], 
-#               and quadratic mean diameter (QMD) [cm].
-#               The plots with the calculated forest attributes are clipped
-#               to the area of interest (AOI), which is the area covered by both
-#               leaf-off and leaf-on airborne laser scanning (ALS) datasets.
-#               Some plots were were remeasured with RTK-GNSS. Where available,
-#               the corrected coordinates of these plots are used.
-#               Plots with a defined vegetation height change between leaf-on 
-#               and leaf-off that cannot be attributed to seasonal differences,
+# Description:  Calculation of forest attributes in inventory plots (Betriebsionventur (BI) Lower Saxony).
+#               Inventory data is first pre-processed and then volume (total and merchantable)
+#               and above ground biomass (AGB) are calculated for individual trees. 
+#               The tree volumes and AGB are aggregated per sample plot to obtain the growing stock volume (GSV) [m³/ha] and AGB [t/ha].
+#               Other attributes which are calculated per sample plot include tree density [n/ha],
+#               basal area [m³/ha], and quadratic mean diameter (QMD) [cm].
+#               The plots with the calculated forest attributes are clipped to the area of interest (AOI),
+#               which is the area covered by both leaf-off and leaf-on airborne laser scanning (ALS) datasets.
+#               Some plots were were remeasured with RTK-GNSS. Where available, the corrected coordinates of these plots are used.
+#               Plots with a defined vegetation height change between leaf-on and leaf-off that cannot be attributed to seasonal differences,
 #               but rather to treefall (harvest, natural disturbance), are removed.
 # Author:       Christoph Fischer, Georgia Reeves, Florian Franz
 # Contact:      christoph.fischer@nw-fva.de
 #               georgia.reeves@nw-fva.de
 #               florian.franz@nw-fva.de
-#-------------------------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------------------------------------------
 
 
 # source setup script
@@ -289,127 +283,94 @@ rm(dat2, dat)
 
 
 
-# 03: calculate individual tree volume
+# 03: calculate individual tree volume and AGB
 #-------------------------------------------------------------------------------
 
-vor <- bi_points_trees
-
-# recode tree species before applying treegross
-vor$ba1 <- ifelse(vor$ba == 561 | vor$ba == 526 , 511,
-           ifelse(vor$ba == 21 , 211,
-           ifelse(vor$ba == 716, 711, vor$ba)))
-
-# add empty columns
-vor$vol <- NA
-vor$volC <- NA
-
-# create empty table
-cop <- vor[-(1:dim(vor)[1]),]
-
-# calculation of volumes with tg_volume
-# https://github.com/rnuske/TreeGrOSSinR
-# correction of negative volumes with GAM
-# to avoid them
-d = seq(7, 99, by = 2)
-h = seq(1, 59,  by = 2)
-data = expand.grid(d = d, h = h)
-
-for(i in unique(vor$ba1)){
-  
-  print(i)
-  
-  vor2 <- vor[vor$ba1 == i,]
-  vor2$vol <- TreeGrOSSinR::tg_volumen(ba=i, bhd=vor2$bhd, h=vor2$hoe_mod, info = F)
-  
-  data$vol <- TreeGrOSSinR::tg_volumen(ba=i, bhd=data$d, h=data$h, info = F)
-  m <-mgcv::gam(vol ~ t2(d, h, k = 10), data = data, family = gaussian(link = 'log'))
-  
-  vor2$volC <- predict(m, newdata=data.frame(d=vor2$bhd, h=vor2$hoe_mod), type = 'response')
-  
-  cop <- rbind(cop, vor2)
-  
-}
-
-cop$vol <- ifelse(cop$vol <= 0, cop$volC, cop$vol)
-
-vor <- cop
-rm(m, data, cop, i, vor2)
-vor$ba1 <- NULL
-vor$id2 <- NULL
-vor$volC <- NULL 
-
-bi_points_trees <- vor
-summary(bi_points_trees$vol)
-plot(bi_points_trees$bhd, bi_points_trees$vol)
-
-
-
-# 04: calculate individual tree AGB
-#-------------------------------------------------------------------------------
-
-agb <- bi_points_trees
+vol_agb <- bi_points_trees
 
 # recode tree species before applying rBDAT
-agb$ba1 <- ifelse(agb$ba == 110 | agb$ba == 111 | agb$ba == 112, 17,
-           ifelse(agb$ba == 113, 18,
-           ifelse(agb$ba == 211, 15,
-           ifelse(agb$ba == 221, 16,
-           ifelse(agb$ba == 311, 21,
-           ifelse(agb$ba == 320, 22,
-           ifelse(agb$ba == 321, 23,
-           ifelse(agb$ba == 322, 24,
-           ifelse(agb$ba == 323, 25,
-           ifelse(agb$ba == 330 | agb$ba == 331 | agb$ba == 332, 30,
-           ifelse(agb$ba == 341 | agb$ba == 342, 27,
-           ifelse(agb$ba == 351, 31,
-           ifelse(agb$ba == 352 | agb$ba == 442, 33,
-           ifelse(agb$ba == 353 | agb$ba == 355, 35,
-           ifelse(agb$ba == 354 | agb$ba == 452, 29,
-           ifelse(agb$ba == 357, 32,
-           ifelse(agb$ba == 410 | agb$ba == 411 | agb$ba == 412 | agb$ba == 414, 26,
-           ifelse(agb$ba == 420 | agb$ba == 421 | agb$ba == 422, 28,
-           ifelse(agb$ba == 430 | agb$ba == 431, 19,
-           ifelse(agb$ba == 441, 34,
-           ifelse(agb$ba == 451, 36,
-           ifelse(agb$ba == 511 | agb$ba == 513 | agb$ba == 551, 1,
-           ifelse(agb$ba == 512, 2,
-           ifelse(agb$ba == 521, 3,
-           ifelse(agb$ba == 523, 4,
-           ifelse(agb$ba == 541, 13,
-           ifelse(agb$ba == 542, 12,
-           ifelse(agb$ba == 611, 8,
-           ifelse(agb$ba == 711, 5,
-           ifelse(agb$ba == 712, 6,
-           ifelse(agb$ba == 731, 7,
-           ifelse(agb$ba == 810, 9,
-           ifelse(agb$ba == 811, 10,
-           ifelse(agb$ba == 812, 11, vor$ba)
-           )))))))))))))))))))))))))))))))))
+# mapping from BI tree species codes to rBDAT species codes
+vol_agb$ba1 <- ifelse(vol_agb$ba == 110 | vol_agb$ba == 111 | vol_agb$ba == 112, 17,
+               ifelse(vol_agb$ba == 113, 18,
+               ifelse(vol_agb$ba == 211, 15,
+               ifelse(vol_agb$ba == 221, 16,
+               ifelse(vol_agb$ba == 311, 21,
+               ifelse(vol_agb$ba == 320, 22,
+               ifelse(vol_agb$ba == 321, 23,
+               ifelse(vol_agb$ba == 322, 24,
+               ifelse(vol_agb$ba == 323, 25,
+               ifelse(vol_agb$ba == 330 | vol_agb$ba == 331 | vol_agb$ba == 332, 30,
+               ifelse(vol_agb$ba == 341 | vol_agb$ba == 342, 27,
+               ifelse(vol_agb$ba == 351, 31,
+               ifelse(vol_agb$ba == 352 | vol_agb$ba == 442, 33,
+               ifelse(vol_agb$ba == 353 | vol_agb$ba == 355, 35,
+               ifelse(vol_agb$ba == 354 | vol_agb$ba == 452, 29,
+               ifelse(vol_agb$ba == 357, 32,
+               ifelse(vol_agb$ba == 410 | vol_agb$ba == 411 | vol_agb$ba == 412 | vol_agb$ba == 414, 26,
+               ifelse(vol_agb$ba == 420 | vol_agb$ba == 421 | vol_agb$ba == 422, 28,
+               ifelse(vol_agb$ba == 430 | vol_agb$ba == 431, 19,
+               ifelse(vol_agb$ba == 441, 34,
+               ifelse(vol_agb$ba == 451, 36,
+               ifelse(vol_agb$ba == 511 | vol_agb$ba == 513 | vol_agb$ba == 551, 1,
+               ifelse(vol_agb$ba == 512, 2,
+               ifelse(vol_agb$ba == 521, 3,
+               ifelse(vol_agb$ba == 523, 4,
+               ifelse(vol_agb$ba == 541, 13,
+               ifelse(vol_agb$ba == 542, 12,
+               ifelse(vol_agb$ba == 611, 8,
+               ifelse(vol_agb$ba == 711, 5,
+               ifelse(vol_agb$ba == 712, 6,
+               ifelse(vol_agb$ba == 731, 7,
+               ifelse(vol_agb$ba == 810, 9,
+               ifelse(vol_agb$ba == 811, 10,
+               ifelse(vol_agb$ba == 812, 11, vol_agb$ba)
+               )))))))))))))))))))))))))))))))))
 
-# add empty column
-agb$agb <- NA
+# calculation of volume with rBDAT::getVolume
+# https://gitlab.com/vochr/rbdat
+print('Calculating total volume...')
+vol_agb$total_vol <- rBDAT::getVolume(
+  vol_agb,
+  bark = T,
+  mapping = c('ba1' = 'spp', 'bhd' = 'D1', 'hoe_mod' = 'H')
+)
+
+print('Calculating merchantable volume...')
+vol_agb$merch_vol <- rBDAT::getVolume(
+  vol_agb,
+  bark = F,
+  mapping = c('ba1' = 'spp', 'bhd' = 'D1', 'hoe_mod' = 'H')
+)
 
 # calculation of AGB with rBDAT::getBiomass
-# https://gitlab.com/vochr/rbdat
-for(i in unique(agb$ba1)){
-  
-  print(i)
-  
-  agb$agb <- rBDAT::getBiomass(
-    agb,
-    mapping = c('ba1' = 'spp', 'bhd' = 'D1', 'hoe_mod' = 'H')
-  )
-  
-}
+print('Calculating AGB...')
+vol_agb$agb <- rBDAT::getBiomass(
+  vol_agb,
+  mapping = c('ba1' = 'spp', 'bhd' = 'D1', 'hoe_mod' = 'H')
+)
 
-agb$ba1 <- NULL
-bi_points_trees <- agb
-summary(agb)
-plot(agb$bhd, agb$agb)
+vol_agb$ba1 <- NULL
+
+# add results to bi_points_trees
+bi_points_trees$total_vol <- vol_agb$total_vol
+bi_points_trees$merch_vol <- vol_agb$merch_vol
+bi_points_trees$agb <- vol_agb$agb
+
+summary(bi_points_trees$total_vol)
+summary(bi_points_trees$merch_vol)
+summary(bi_points_trees$agb)
+
+par(mfrow = c(1,3))
+plot(bi_points_trees$bhd, bi_points_trees$total_vol)
+plot(bi_points_trees$bhd, bi_points_trees$merch_vol)
+plot(bi_points_trees$bhd, bi_points_trees$agb)
+par(mfrow = c(1,1))
+
+rm(vol_agb)
 
 
 
-# 05: aggregate volume and AGB per sample plot
+# 04: aggregate volume and AGB per sample plot
 #-------------------------------------------------------------------------------
 
 # add column of leaf type
@@ -426,7 +387,8 @@ bi_points_trees$leaf_type <- ifelse(
 bi_points_trees <- bi_points_trees %>%
   dplyr::group_by(key, kspnr) %>%
   dplyr::mutate(
-    vol_ha = sum(vol * nha),
+    total_vol_ha = sum(total_vol * nha),
+    merch_vol_ha = sum(merch_vol * nha),
     agb_ha = sum(agb * nha) / 1000,
     tree_density = mean(nha),
     basal_area_tree = (pi / 4) * (bhd / 100)^2,
@@ -446,8 +408,11 @@ bi_points_trees <- bi_points_trees %>%
 
 # extract unique forest inventory variables for all sample plots
 inv_attr_plots <- unique(
-  bi_points_trees[,c("key", "kspnr", "abt", "rw", "hw", "vol_ha", "agb_ha",
-                     "tree_density", "basal_area_ha", "dg", "dominant_leaf_type")])
+  bi_points_trees[,c(
+    "key", "kspnr", "abt", "rw", "hw", "total_vol_ha", "merch_vol_ha",
+    "agb_ha", "tree_density", "basal_area_ha", "dg", "dominant_leaf_type"
+    )]
+  )
 
 #vol_stp <- merge(bi_points[,c("key", "kspnr", "abt", "rw", "hw")], 
 #                 vol_stp, by=c("key", "kspnr", "abt", "rw", "hw"), 
@@ -458,14 +423,24 @@ inv_attr_plots[is.na(inv_attr_plots)] <- 0
 head(inv_attr_plots)
 summary(inv_attr_plots)
 
-boxplot(inv_attr_plots$vol_ha)
+par(mfrow = c(2,3))
+boxplot(inv_attr_plots$total_vol_ha)
+boxplot(inv_attr_plots$merch_vol_ha)
 boxplot(inv_attr_plots$agb_ha)
 boxplot(inv_attr_plots$tree_density)
 boxplot(inv_attr_plots$basal_area_ha)
 boxplot(inv_attr_plots$dg)
+par(mfrow = c(1,1))
 
-hist(inv_attr_plots$vol_ha)
+par(mfrow = c(2,3))
+hist(inv_attr_plots$total_vol_ha)
+hist(inv_attr_plots$merch_vol_ha)
 hist(inv_attr_plots$agb_ha)
+hist(inv_attr_plots$tree_density)
+hist(inv_attr_plots$basal_area_ha)
+hist(inv_attr_plots$dg)
+par(mfrow = c(1,1))
+
 
 
 # 06: clip sample plots to the AOI
