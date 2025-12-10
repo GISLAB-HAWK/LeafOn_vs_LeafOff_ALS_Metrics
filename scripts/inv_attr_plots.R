@@ -409,14 +409,10 @@ bi_points_trees <- bi_points_trees %>%
 # extract unique forest inventory variables for all sample plots
 inv_attr_plots <- unique(
   bi_points_trees[,c(
-    "key", "kspnr", "abt", "rw", "hw", "total_vol_ha", "merch_vol_ha",
-    "agb_ha", "tree_density", "basal_area_ha", "dg", "dominant_leaf_type"
+    'key', 'kspnr', 'abt', 'rw', 'hw', 'total_vol_ha', 'merch_vol_ha',
+    'agb_ha', 'tree_density', 'basal_area_ha', 'dg', 'dominant_leaf_type'
     )]
   )
-
-#vol_stp <- merge(bi_points[,c("key", "kspnr", "abt", "rw", "hw")], 
-#                 vol_stp, by=c("key", "kspnr", "abt", "rw", "hw"), 
-#                 all.x=T)
 
 inv_attr_plots[is.na(inv_attr_plots)] <- 0
 
@@ -443,7 +439,7 @@ par(mfrow = c(1,1))
 
 
 
-# 06: clip sample plots to the AOI
+# 05: clip sample plots to the AOI
 #-------------------------------------------------------------------------------
 
 # conversion to sf object (DHDN / 3-degree Gauss-Kruger zone 3)
@@ -460,6 +456,7 @@ lidR::plot(pc_ctg_loff)
 terra::plot(inv_attr_plots_utm$geometry, col = 'red', add = T)
 lidR::plot(pc_ctg_lon)
 terra::plot(inv_attr_plots_utm$geometry, col = 'red', add = T)
+par(mfrow = c(1,1))
 
 # clip BI plots to the area only covered by leaf-off point clouds
 # leaf-off covers a slightly smaller area than leaf-on
@@ -474,12 +471,14 @@ inv_attr_plots_aoi <- inv_attr_plots_aoi[, original_cols]
 
 summary(inv_attr_plots_aoi)
 table(inv_attr_plots_aoi$dominant_leaf_type)
-par(mfrow = c(3,2))
-boxplot(inv_attr_plots_aoi$vol_ha)
+par(mfrow = c(2,3))
+boxplot(inv_attr_plots_aoi$total_vol_ha)
+boxplot(inv_attr_plots_aoi$merch_vol_ha)
 boxplot(inv_attr_plots_aoi$agb_ha)
 boxplot(inv_attr_plots_aoi$tree_density)
 boxplot(inv_attr_plots_aoi$basal_area_ha)
 boxplot(inv_attr_plots_aoi$dg)
+par(mfrow = c(1,1))
 
 # visualize locations of the BI plots
 lidR::plot(pc_ctg_lon, mapview = T, 
@@ -496,7 +495,7 @@ lidR::plot(pc_ctg_loff, mapview = T,
 
 
 
-# 07: include remeasured RTK-GNSS plots
+# 06: include remeasured RTK-GNSS plots
 #-------------------------------------------------------------------------------
 
 # merge remeasured plots into inv_attr_plots_aoi
@@ -542,13 +541,13 @@ if (any(matching_plots)) {
 
 
 
-# 08: remove plots based on height differences between leaf-off and leaf-on
+# 07: remove plots based on height differences between leaf-off and leaf-on
 #-------------------------------------------------------------------------------
 
 # define path for storing excluded plots
 excluded_plots_file <- file.path(
   processed_data_dir, 'forest_inventory', 'excluded_plots_height_diff.csv'
-  )
+)
 
 # check if we already have the list of plots to exclude
 if (file.exists(excluded_plots_file)) {
@@ -563,15 +562,30 @@ if (file.exists(excluded_plots_file)) {
   cat('Running CHM analysis to identify plots to exclude...\n')
   
   extract_plot_heights_chm <- function(
-    
-    catalog, plots, res = 0.5, buffer_radius = 13) {
+    catalog_path,
+    plots,
+    res = 0.5, 
+    buffer_radius = 13)
+    {
     
     # create buffered plots
     plots_buffered <- sf::st_buffer(plots, dist = buffer_radius)
     
+    # read LAScatalog
+    ctg <- lidR::readLAScatalog(catalog_path)
+    
     # generate CHM for the area containing all plots
-    chm_opt <- list(res = res, algorithm = lidR::p2r())
-    chm <- lidR::rasterize_canopy(catalog, chm_opt$res, chm_opt$algorithm)
+    chm <- lasR::rasterize(res = res, operators = max(HAG))
+    
+    # execute pipeline on the catalog
+    ans <- lasR::exec(
+      chm, 
+      on = ctg,
+      with = list(ncores = lasR::half_cores(), progress = T)
+      )
+    
+    # the result is a SpatRaster
+    chm <- ans
     
     # extract mean height within each plot
     plot_heights <- exactextractr::exact_extract(
@@ -588,12 +602,12 @@ if (file.exists(excluded_plots_file)) {
     return(plot_heights)
   }
   
-  # extract heights from CHMs of both point cloud catalogs
+  # extract heights from CHMs of both point cloud catalogs (leaf-off/-on)
   cat('Extracting heights from leaf-off point cloud...\n')
-  heights_loff <- extract_plot_heights_chm(pc_ctg_loff, inv_attr_plots_aoi)
+  heights_loff <- extract_plot_heights_chm(pc_loff_path, inv_attr_plots_aoi)
   
-  cat('Extracting heights from leaf-on point cloud...\n') 
-  heights_lon <- extract_plot_heights_chm(pc_ctg_lon, inv_attr_plots_aoi)
+  cat('Extracting heights from leaf-on point cloud...\n')
+  heights_lon <- extract_plot_heights_chm(pc_lon_path, inv_attr_plots_aoi)
   
   # add heights to plots
   inv_attr_plots_aoi$height_loff <- heights_loff
@@ -604,7 +618,7 @@ if (file.exists(excluded_plots_file)) {
     inv_attr_plots_aoi$height_loff - inv_attr_plots_aoi$height_lon
   
   # create filter based on height difference threshold
-  height_diff_threshold <- -10  
+  height_diff_threshold <- -10
   valid_plots <- is.na(inv_attr_plots_aoi$height_diff) |
     inv_attr_plots_aoi$height_diff > height_diff_threshold
   table(valid_plots)
@@ -621,7 +635,7 @@ if (file.exists(excluded_plots_file)) {
   sf::st_write(
     inv_attr_plots_aoi,
     file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots_non_filtered.gpkg')
-    )
+  )
   
 }
 
@@ -634,22 +648,54 @@ inv_attr_plots_aoi_filtered <- inv_attr_plots_aoi[valid_plots, ]
 # filter remeasured plots
 if (!is.null(remeasured_plots_non_rtk) && !is.null(remeasured_plots_rtk)) {
   remeasured_plots_non_rtk_filtered <- remeasured_plots_non_rtk[
-    !remeasured_plots_non_rtk$kspnr %in% plots_to_exclude, 
+    !remeasured_plots_non_rtk$kspnr %in% plots_to_exclude,
   ]
   remeasured_plots_rtk_filtered <- remeasured_plots_rtk[
-    !remeasured_plots_rtk$kspnr %in% plots_to_exclude, 
+    !remeasured_plots_rtk$kspnr %in% plots_to_exclude,
   ]
   
   cat('Filtered datasets:\n')
   cat('Main plots:', nrow(inv_attr_plots_aoi_filtered), '/', nrow(inv_attr_plots_aoi), '\n')
   cat('Remeasured (non-RTK):', nrow(remeasured_plots_non_rtk_filtered), '/', nrow(remeasured_plots_non_rtk), '\n')
   cat('Remeasured (RTK):', nrow(remeasured_plots_rtk_filtered), '/', nrow(remeasured_plots_rtk), '\n')
-  
 }
 
+# summary statistics
+summary(inv_attr_plots_aoi_filtered)
+summary_df <- as.data.frame(
+  do.call(cbind, lapply(inv_attr_plots_aoi_filtered, summary))
+)
+write.csv(
+  summary_df, 
+  file.path(
+    processed_data_dir, 
+    'forest_inventory', 
+    'summary_stats_inv_attr_plots_aoi_filtered.csv')
+)
+table(inv_attr_plots_aoi_filtered$dominant_leaf_type)
+table_df <- as.data.frame(table(inv_attr_plots_aoi_filtered$dominant_leaf_type))
+write.csv(
+  table_df,
+  file.path(
+    processed_data_dir, 
+    'forest_inventory',
+    'n_plots_dom_leaf_type.csv'), 
+    row.names = F
+  )
+
+# boxplots
+par(mfrow = c(2,3))
+boxplot(inv_attr_plots_aoi_filtered$total_vol_ha)
+boxplot(inv_attr_plots_aoi_filtered$merch_vol_ha)
+boxplot(inv_attr_plots_aoi_filtered$agb_ha)
+boxplot(inv_attr_plots_aoi_filtered$tree_density)
+boxplot(inv_attr_plots_aoi_filtered$basal_area_ha)
+boxplot(inv_attr_plots_aoi_filtered$dg)
+par(mfrow = c(1,1))
 
 
-# 09: save BI plots with the forest inventory attributes per sample plot
+
+# 08: save BI plots with the forest inventory attributes per sample plot
 #-------------------------------------------------------------------------------
 
 out_path <- file.path(processed_data_dir, 'forest_inventory')
