@@ -23,12 +23,20 @@ if (!file.exists(paste('data')) |
          (!file.exists(paste('data/processed_data/forest_inventory')) |
           (!file.exists(paste('data/processed_data/pc_leafoff_2024')) |
            (!file.exists(paste('data/processed_data/pc_leafon_2023')) |
-            (!file.exists(paste('data/processed_data/metrics')) |
-             (!file.exists(paste('data/processed_data/train_test_ds')) |
-              (!file.exists(paste('data/processed_data/models')) |
-               (!file.exists(paste('data/processed_data/predictions')) |
-                (!file.exists(paste('data/metadata'))
-                ))))))))))))))
+            (!file.exists(paste('data/processed_data/pc_leafoff_2024/ppm4')) |
+             (!file.exists(paste('data/processed_data/pc_leafoff_2024/ppm10')) |
+              (!file.exists(paste('data/processed_data/pc_leafoff_2024/ppm20')) |
+               (!file.exists(paste('data/processed_data/pc_leafon_2023/ppm4')) |
+                (!file.exists(paste('data/processed_data/pc_leafon_2023/ppm10')) |
+                 (!file.exists(paste('data/processed_data/pc_leafon_2023/ppm20')) |
+                  (!file.exists(paste('data/processed_data/metrics')) |
+                   (!file.exists(paste('data/processed_data/metrics/plt_level')) |
+                    (!file.exists(paste('data/processed_data/metrics/pix_level')) |
+                     (!file.exists(paste('data/processed_data/train_test_ds')) |
+                      (!file.exists(paste('data/processed_data/models')) |
+                       (!file.exists(paste('data/processed_data/predictions')) |
+                        (!file.exists(paste('data/metadata'))
+                ))))))))))))))))))))))
   {
   
   dir.create('data')
@@ -40,7 +48,15 @@ if (!file.exists(paste('data')) |
   dir.create('data/processed_data/forest_inventory')
   dir.create('data/processed_data/pc_leafoff_2024')
   dir.create('data/processed_data/pc_leafon_2023')
+  dir.create('data/processed_data/pc_leafoff_2024/ppm4')
+  dir.create('data/processed_data/pc_leafoff_2024/ppm10')
+  dir.create('data/processed_data/pc_leafoff_2024/ppm20')
+  dir.create('data/processed_data/pc_leafon_2023/ppm4')
+  dir.create('data/processed_data/pc_leafon_2023/ppm10')
+  dir.create('data/processed_data/pc_leafon_2023/ppm20')
   dir.create('data/processed_data/metrics')
+  dir.create('data/processed_data/metrics/plt_level')
+  dir.create('data/processed_data/metrics/pix_level')
   dir.create('data/processed_data/train_test_ds')
   dir.create('data/processed_data/models')
   dir.create('data/processed_data/predictions')
@@ -105,10 +121,10 @@ list.files(recursive = TRUE, include.dirs = TRUE)
 #---------------------------
 
 # define raw data directory
-raw_data_dir <- 'data/raw_data/'
+raw_data_dir <- 'data/raw_data'
 
 # define processed data directory
-processed_data_dir <- 'data/processed_data/'
+processed_data_dir <- 'data/processed_data' 
 
 # define output directory
 output_dir <- 'output/'
@@ -166,7 +182,7 @@ load_packages <- function(packages, github_remotes = NULL, github_repos = NULL) 
 load_packages(
   c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2',
     'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST',
-    'parallel', 'doParallel'),
+    'parallel', 'doParallel', 'tidyverse'),
   github_remotes = c(TreeGrOSSinR = 'rnuske/TreeGrOSSinR'),
   github_repos = c(lasR = 'https://r-lidar.r-universe.dev')
   )
