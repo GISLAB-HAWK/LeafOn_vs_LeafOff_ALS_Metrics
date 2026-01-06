@@ -59,7 +59,28 @@ head(bi_points)
 head(bi_trees)
 
 # read remeasured plots (RTK-GNSS)
-bi_plots_rtk <- sf::st_read(file.path(bi_path, 'bi_center_points_rtk.gpkg'))
+bi_plots_rtk_1 <- sf::st_read(file.path(bi_path, 'bi_center_points_rtk.gpkg'))
+bi_plots_rtk_2 <- sf::st_read(file.path(bi_path, 'remeasured_plots.shp'))
+
+# clean up bi_plots_rtk_1: 
+# - create kspnr column from KSPNR
+# - rename geometry column to 'geometry' for consistency
+bi_plots_rtk_1$kspnr <- bi_plots_rtk_1$KSPNR
+sf::st_geometry(bi_plots_rtk_1) <- 'geometry'
+
+# clean up bi_plots_rtk_2:
+# - remove trailing letters (e.g. "e" or "b") from Name column to get kspnr
+# - drop Z dimension from geometry
+bi_plots_rtk_2$kspnr <- as.integer(gsub('[a-zA-Z]$', '', bi_plots_rtk_2$Name))
+bi_plots_rtk_2 <- sf::st_zm(bi_plots_rtk_2, drop = T, what = 'ZM')
+
+# merge both RTK datasets, keeping only geometry and kspnr
+bi_plots_rtk <- rbind(
+  bi_plots_rtk_1[, 'kspnr'],
+  bi_plots_rtk_2[, 'kspnr']
+)
+
+head(bi_plots_rtk)
 
 # read point clouds with LAScatalog
 pc_ctg_loff <- lidR::readLAScatalog(pc_loff_path)
@@ -439,7 +460,7 @@ par(mfrow = c(1,1))
 
 
 
-# 05: clip sample plots to the AOI
+# 05: include remeasured RTK-GNSS plots
 #-------------------------------------------------------------------------------
 
 # conversion to sf object (DHDN / 3-degree Gauss-Kruger zone 3)
@@ -449,6 +470,51 @@ inv_attr_plots_gk <- sf::st_as_sf(
 
 # transformation to ETRS89 / UTM zone 32N
 inv_attr_plots_utm <- sf::st_transform(inv_attr_plots_gk, crs = 25832)
+
+# merge remeasured plots into inv_attr_plots_utm
+inv_attr_plots_utm$remeasured <- 'no'
+
+# identify matching plots based on kspnr column
+matching_plots <- inv_attr_plots_utm$kspnr %in% bi_plots_rtk$kspnr
+
+# mark remeasured plots
+inv_attr_plots_utm$remeasured[matching_plots] <- 'yes'
+
+# create sf object with non-RTK geometries (without RTK position)
+remeasured_plots_non_rtk <- inv_attr_plots_utm[matching_plots, ]
+
+# for plots that were remeasured,
+# update their geometry with the more accurate RTK positions
+if (any(matching_plots)) {
+  
+  # update geometry for remeasured plots
+  for (i in which(matching_plots)) {
+    kspnr_val <- inv_attr_plots_utm$kspnr[i]
+    rtk_row <- which(bi_plots_rtk$kspnr == kspnr_val)
+    if (length(rtk_row) > 0) {
+      sf::st_geometry(inv_attr_plots_utm)[i] <- sf::st_geometry(bi_plots_rtk)[rtk_row[1]]
+    }
+  }
+  
+  # create sf object with RTK geometries (after RTK update)
+  remeasured_plots_rtk <- inv_attr_plots_utm[matching_plots, ]
+  
+  cat('Updated', sum(matching_plots), 'plots with RTK-GNSS coordinates\n')
+  cat('Created remeasured_plots_non_rtk:', nrow(remeasured_plots_non_rtk), 'plots with original geometries\n')
+  cat('Created remeasured_plots_rtk:', nrow(remeasured_plots_rtk), 'plots with RTK geometries\n')
+  
+} else {
+  
+  cat('No matching plots found between inv_attr_plots_utm and bi_plots_rtk\n')
+  remeasured_plots_non_rtk <- NULL
+  remeasured_plots_rtk <- NULL
+  
+}
+
+
+
+# 06: clip sample plots to the AOI
+#-------------------------------------------------------------------------------
 
 # quick plot
 par(mfrow = c(1,2))
@@ -460,14 +526,23 @@ par(mfrow = c(1,1))
 
 # clip BI plots to the area only covered by leaf-off point clouds
 # leaf-off covers a slightly smaller area than leaf-on
-inv_attr_plots_aoi <- sf::st_intersection(
-  inv_attr_plots_utm, sf::st_as_sf(pc_ctg_loff)
-  )
+aoi <- sf::st_as_sf(pc_ctg_loff)
+inv_attr_plots_aoi <- sf::st_intersection(inv_attr_plots_utm, aoi)
 
 # keep only the original columns from inv_attr_plots_utm 
 # (remove LAScatalog columns)
 original_cols <- names(inv_attr_plots_utm)
 inv_attr_plots_aoi <- inv_attr_plots_aoi[, original_cols]
+
+# clip remeasured plots (non-RTK and RTK) to AOI
+original_cols_remeasured <- names(remeasured_plots_non_rtk)
+remeasured_plots_non_rtk_aoi <- sf::st_intersection(remeasured_plots_non_rtk, aoi)
+remeasured_plots_non_rtk_aoi <- remeasured_plots_non_rtk_aoi[, original_cols_remeasured]
+remeasured_plots_rtk_aoi <- sf::st_intersection(remeasured_plots_rtk, aoi)
+remeasured_plots_rtk_aoi <- remeasured_plots_rtk_aoi[, original_cols_remeasured]
+
+cat('Remeasured plots (non-RTK) in AOI:', nrow(remeasured_plots_non_rtk_aoi), '\n')
+cat('Remeasured plots (RTK) in AOI:', nrow(remeasured_plots_rtk_aoi), '\n')
 
 summary(inv_attr_plots_aoi)
 table(inv_attr_plots_aoi$dominant_leaf_type)
@@ -495,52 +570,6 @@ lidR::plot(pc_ctg_loff, mapview = T,
 
 
 
-# 06: include remeasured RTK-GNSS plots
-#-------------------------------------------------------------------------------
-
-# merge remeasured plots into inv_attr_plots_aoi
-inv_attr_plots_aoi$remeasured <- 'no'
-
-# identify matching plots based on kspnr column
-# note: inv_attr_plots_aoi has "kspnr", bi_plots_rtk has "KSPNR"
-matching_plots <- inv_attr_plots_aoi$kspnr %in% bi_plots_rtk$KSPNR
-
-# mark remeasured plots
-inv_attr_plots_aoi$remeasured[matching_plots] <- 'yes'
-
-# create sf object with non-RTK geometries (without RTK position)
-remeasured_plots_non_rtk <- inv_attr_plots_aoi[matching_plots, ]
-
-# for plots that were remeasured,
-# update their geometry with the more accurate RTK positions
-if (any(matching_plots)) {
-  
-  # update geometry for remeasured plots
-  for (i in which(matching_plots)) {
-    kspnr_val <- inv_attr_plots_aoi$kspnr[i]
-    rtk_row <- which(bi_plots_rtk$KSPNR == kspnr_val)
-    if (length(rtk_row) > 0) {
-      sf::st_geometry(inv_attr_plots_aoi)[i] <- sf::st_geometry(bi_plots_rtk)[rtk_row[1]]
-    }
-  }
-  
-  # create sf object with RTK geometries (after RTK update)
-  remeasured_plots_rtk <- inv_attr_plots_aoi[matching_plots, ]
-  
-  cat('Updated', sum(matching_plots), 'plots with RTK-GNSS coordinates\n')
-  cat('Created remeasured_plots_non_rtk:', nrow(remeasured_plots_non_rtk), 'plots with original geometries\n')
-  cat('Created remeasured_plots_rtk:', nrow(remeasured_plots_rtk), 'plots with RTK geometries\n')
-  
-} else {
-  
-  cat('No matching plots found between inv_attr_plots_aoi and bi_plots_rtk\n')
-  remeasured_plots_old <- NULL
-  remeasured_plots_new <- NULL
-  
-}
-
-
-
 # 07: remove plots based on height differences between leaf-off and leaf-on
 #-------------------------------------------------------------------------------
 
@@ -562,7 +591,7 @@ if (file.exists(excluded_plots_file)) {
   cat('Running CHM analysis to identify plots to exclude...\n')
   
   extract_plot_heights_chm <- function(
-    catalog_path,
+    pc_path,
     plots,
     res = 0.5, 
     buffer_radius = 13)
@@ -571,21 +600,38 @@ if (file.exists(excluded_plots_file)) {
     # create buffered plots
     plots_buffered <- sf::st_buffer(plots, dist = buffer_radius)
     
-    # read LAScatalog
-    ctg <- lidR::readLAScatalog(catalog_path)
+    # get all LAZ files from the path
+    laz_files <- list.files(pc_path, pattern = '\\.laz$', full.names = T)
     
-    # generate CHM for the area containing all plots
-    chm <- lasR::rasterize(res = res, operators = max(HAG))
+    # process each file individually and collect CHMs
+    chm_list <- list()
     
-    # execute pipeline on the catalog
-    ans <- lasR::exec(
-      chm, 
-      on = ctg,
-      with = list(ncores = lasR::half_cores(), progress = T)
+    for (i in seq_along(laz_files)) {
+      
+      cat(sprintf('  Processing file %d/%d\n', i, length(laz_files)))
+      
+      # create fresh pipeline for each file
+      chm_stage <- lasR::rasterize(res = res, operators = max(HAG))
+      na_fill <- lasR::focal(chm_stage, size = 3, fun = 'mean')
+      pipeline <- chm_stage + na_fill
+      
+      # execute pipeline on single file
+      ans <- lasR::exec(
+        pipeline, 
+        on = laz_files[i],
+        with = list(ncores = lasR::half_cores(), progress = T)
       )
+      
+      # store the NA-filled CHM (second element)
+      chm_list[[i]] <- ans[[2]]
+    }
     
-    # the result is a SpatRaster
-    chm <- ans
+    # merge all CHMs into one
+    if (length(chm_list) == 1) {
+      chm <- chm_list[[1]]
+    } else {
+      chm <- do.call(terra::merge, chm_list)
+    }
     
     # extract mean height within each plot
     plot_heights <- exactextractr::exact_extract(
@@ -646,18 +692,18 @@ valid_plots <- !inv_attr_plots_aoi$kspnr %in% plots_to_exclude
 inv_attr_plots_aoi_filtered <- inv_attr_plots_aoi[valid_plots, ]
 
 # filter remeasured plots
-if (!is.null(remeasured_plots_non_rtk) && !is.null(remeasured_plots_rtk)) {
-  remeasured_plots_non_rtk_filtered <- remeasured_plots_non_rtk[
-    !remeasured_plots_non_rtk$kspnr %in% plots_to_exclude,
+if (!is.null(remeasured_plots_non_rtk_aoi) && !is.null(remeasured_plots_rtk_aoi)) {
+  remeasured_plots_non_rtk_aoi_filtered <- remeasured_plots_non_rtk_aoi[
+    !remeasured_plots_non_rtk_aoi$kspnr %in% plots_to_exclude,
   ]
-  remeasured_plots_rtk_filtered <- remeasured_plots_rtk[
-    !remeasured_plots_rtk$kspnr %in% plots_to_exclude,
+  remeasured_plots_rtk_aoi_filtered <- remeasured_plots_rtk_aoi[
+    !remeasured_plots_rtk_aoi$kspnr %in% plots_to_exclude,
   ]
   
   cat('Filtered datasets:\n')
   cat('Main plots:', nrow(inv_attr_plots_aoi_filtered), '/', nrow(inv_attr_plots_aoi), '\n')
-  cat('Remeasured (non-RTK):', nrow(remeasured_plots_non_rtk_filtered), '/', nrow(remeasured_plots_non_rtk), '\n')
-  cat('Remeasured (RTK):', nrow(remeasured_plots_rtk_filtered), '/', nrow(remeasured_plots_rtk), '\n')
+  cat('Remeasured (non-RTK):', nrow(remeasured_plots_non_rtk_aoi_filtered), '/', nrow(remeasured_plots_non_rtk_aoi), '\n')
+  cat('Remeasured (RTK):', nrow(remeasured_plots_rtk_aoi_filtered), '/', nrow(remeasured_plots_rtk_aoi), '\n')
 }
 
 # summary statistics
@@ -727,12 +773,12 @@ datasets <- list(
   ),
   list(
     name = 'inv_attr_plots_non_rtk',
-    data = remeasured_plots_non_rtk_filtered,
+    data = remeasured_plots_non_rtk_aoi_filtered,
     drop_geom = T
   ),
   list(
     name = 'inv_attr_plots_rtk',
-    data = remeasured_plots_rtk_filtered,
+    data = remeasured_plots_rtk_aoi_filtered,
     drop_geom = T
   )
 )
