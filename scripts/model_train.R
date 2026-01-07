@@ -26,56 +26,39 @@ source('src/setup.R', local = TRUE)
 # 01 - data reading
 #-------------------------------------------------------------------------------
 
-# read data with inventory plots (BI) 
-# and calculated metrics (leaf-on and leaf-off) and extracted tree species
-plot_metrics <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'vol_stp_filtered_metrics.gpkg')
-  )
+# read data with forest inventory plots (BI) 
+# and calculated metrics (leaf-on and leaf-off)
+plot_metrics_lon <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
+)
 
-head(plot_metrics)
-str(plot_metrics)
+plot_metrics_loff <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
+)
+
+head(plot_metrics_lon)
+head(plot_metrics_lon)
+str(plot_metrics_lon)
+str(plot_metrics_loff)
 
 # read extent of the leaf-off dataset
-ext_loff <- sf::st_read(
-  file.path(processed_data_dir, 'pc_leafoff_2024', 'leafoff.vpc')
-  )
+#ext_loff <- sf::st_read(
+#  file.path(processed_data_dir, 'pc_leafoff_2024', 'leafoff_ppm4.vpc')
+#  )
 
 # plot data
-ggplot() +
-  geom_sf(data = ext_loff, fill = "grey", alpha = 0.1) +
-  geom_sf(data = plot_metrics, aes(col = vol_ha)) +
-  scale_colour_distiller(palette = "YlGn", direction = 1) +
-  theme_bw() +
-  labs(col = "") +
-  ggtitle("Growing Stock Volume (m³/ha)")
+#ggplot() +
+#  geom_sf(data = ext_loff, fill = "grey", alpha = 0.1) +
+#  geom_sf(data = plot_metrics_loff, aes(col = total_vol_ha)) +
+#  scale_colour_distiller(palette = "YlGn", direction = 1) +
+#  theme_bw() +
+#  labs(col = "") +
+#  ggtitle("Growing Stock Volume (m³/ha)")
 
 
 
 # 02: data preparation
 #-------------------------------------------------------------------------------
-
-# remove NA (empty plots)
-plot_metrics <- na.omit(plot_metrics)
-
-# split data for leaf-on and leaf-off
-id_cols <- c(
-  'key', 'kspnr', 'abt', 'vol_ha', 'tree_density',
-  'basal_area_ha', 'dg', 'dominant_leaf_type', 'remeasured'
-  )
-
-# select identifier columns + leaf-on metrics
-plot_metrics_lon <- dplyr::select(
-  plot_metrics,
-  dplyr::any_of(id_cols),
-  dplyr::starts_with('lon_')
-)
-
-# select identifier columns + leaf-off metrics
-plot_metrics_loff <- dplyr::select(
-  plot_metrics,
-  dplyr::any_of(id_cols),
-  dplyr::starts_with('loff_')
-)
 
 # filter plots by dominant leaf type
 plots_lon_deciduous <- plot_metrics_lon %>%
