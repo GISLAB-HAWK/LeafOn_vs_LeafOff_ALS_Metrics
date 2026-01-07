@@ -6,6 +6,7 @@
 #               For further information see
 #               https://github.com/environmentalinformatics-marburg/rsdb-data and 
 #               https://environmentalinformatics-marburg.github.io/rsdb/docs/r_package_installation/ 
+#               The calculated metrics are joined with the forest inventory data.
 # Author:       Florian Franz, Svenja Dobelmann
 # Contact:      florian.franz@nw-fva.de
 #               svenja.dobelmann@hawk.de
@@ -102,9 +103,53 @@ names(pc_loff_metrics)[names(pc_loff_metrics) == 'name'] <- 'kspnr'
 # 03: join calculated metrics with forest inventory data
 #-------------------------------------------------------------------------------
 
+# read forest inventory plots 
+# (already clipped to the AOI and filtered, see script inv_attr_plots.R)
+inv_attr_plots <- sf::st_read(
+  file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots.gpkg')
+  )
 
+inv_attr_plots_metrics_lon <- inv_attr_plots %>%
+  dplyr::left_join(
+    pc_lon_metrics %>% dplyr::mutate(kspnr = as.integer(kspnr)), 
+    by = 'kspnr'
+  )
 
+inv_attr_plots_metrics_loff <- inv_attr_plots %>%
+  dplyr::left_join(
+    pc_loff_metrics %>% dplyr::mutate(kspnr = as.integer(kspnr)), 
+    by = 'kspnr'
+  )
 
+head(inv_attr_plots_metrics_lon)
+head(inv_attr_plots_metrics_loff)
+
+# remove columns with height information from the filtering process
+inv_attr_plots_metrics_lon <- inv_attr_plots_metrics_lon %>%
+  dplyr::select(-height_loff, -height_lon, -height_diff)
+
+inv_attr_plots_metrics_loff <- inv_attr_plots_metrics_loff %>%
+  dplyr::select(-height_loff, -height_lon, -height_diff)
+
+# no metrics can be calculated for plot 36799 in the leaf-off dataset 
+# because most of the plot area (buffered) lies outside the AOI)
+# therefore, this plot is removed also from the leaf-on dataset
+inv_attr_plots_metrics_loff <- inv_attr_plots_metrics_loff %>%
+  dplyr::filter(!is.na(BE_H_MEAN))
+
+inv_attr_plots_metrics_lon <- inv_attr_plots_metrics_lon %>%
+  dplyr::filter(kspnr %in% inv_attr_plots_metrics_loff$kspnr)
+
+# write do disk
+sf::st_write(
+  inv_attr_plots_metrics_lon,
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
+  )
+
+sf::st_write(
+  inv_attr_plots_metrics_loff,
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
+)
 
 
 
