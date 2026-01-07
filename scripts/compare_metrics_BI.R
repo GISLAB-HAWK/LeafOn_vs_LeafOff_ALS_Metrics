@@ -201,7 +201,6 @@ d <- ggplot(df_long, aes(x = value, fill = season)) +
   )
 
 print(d)
-
 #ggsave(paste0(output_dir,"/BI_densityplot_ppm20.pdf"), d ,  dpi = 500, width = 12, height = 10)
 
 

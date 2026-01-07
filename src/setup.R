@@ -182,7 +182,7 @@ load_packages <- function(packages, github_remotes = NULL, github_repos = NULL) 
 load_packages(
   c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2',
     'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST',
-    'parallel', 'doParallel', 'tidyverse'),
+    'parallel', 'doParallel', 'tidyverse', 'corrplot'),
   github_remotes = c(TreeGrOSSinR = 'rnuske/TreeGrOSSinR'),
   github_repos = c(lasR = 'https://r-lidar.r-universe.dev')
   )
