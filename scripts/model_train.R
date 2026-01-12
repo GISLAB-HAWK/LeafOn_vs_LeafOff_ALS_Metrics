@@ -520,7 +520,7 @@ for (resp in response_vars) {
 
 # test where differences between pred and obsv are highest using RMSE
 
-# If you have names for your models
+# get model names
 model_names <- names(cv_predictions)
 
 # Loop through all 24 models
@@ -594,7 +594,6 @@ summary_by_response_leaf <- all_results %>%
     .groups = 'drop'
   )
 
-print(summary_by_response_leaf, n = Inf)
 summary_by_response_leaf %>%
   knitr::kable(digits = 2)
 
@@ -611,8 +610,39 @@ summary_by_response_leaf_cond <- all_results %>%
     .groups = 'drop'
   )
 
-print(summary_by_response_leaf_cond, n = Inf)
 summary_by_response_leaf_cond %>%
+  knitr::kable(digits = 2)
+
+# calculate absolute difference between leaf-on and leaf-off rel. RMSE
+diff_lon_loff <- all_results_plot %>%
+  sf::st_drop_geometry() %>%
+  tidyr::pivot_wider(
+    id_cols = c(response_var, leaf_type, plot_type),
+    names_from = leaf_condition,
+    values_from = rel_RMSE
+  ) %>%
+  dplyr::mutate(
+    abs_diff = abs(`leaf-on` - `leaf-off`),
+    better_condition = ifelse(`leaf-on` < `leaf-off`, "leaf-on", "leaf-off")
+  )
+
+diff_lon_loff %>%
+  dplyr::select(response_var, leaf_type, plot_type, `leaf-on`, `leaf-off`, abs_diff, better_condition) %>%
+  knitr::kable(digits = 2)
+
+# summary: mean difference by leaf type and plot type across all response variables
+diff_summary_by_leaf_type <- diff_lon_loff %>%
+  dplyr::filter(plot_type %in% c("All plots", "RTK remeasured")) %>%
+  dplyr::group_by(leaf_type, plot_type) %>%
+  dplyr::summarise(
+    mean_abs_diff = mean(abs_diff, na.rm = TRUE),
+    sd_abs_diff = sd(abs_diff, na.rm = TRUE),
+    n_leaf_on_better = sum(better_condition == "leaf-on"),
+    n_leaf_off_better = sum(better_condition == "leaf-off"),
+    .groups = 'drop'
+  )
+
+diff_summary_by_leaf_type %>%
   knitr::kable(digits = 2)
 
 # prepare data for plotting
@@ -629,39 +659,78 @@ all_results_plot <- all_results %>%
   )
 
 # plot 1: relative RMSE by response variable and leaf type (aggregated over leaf condition)
+# with error bars showing range between leaf-on and leaf-off
+all_results_summary <- all_results_plot %>%
+  dplyr::group_by(response_var, leaf_type, plot_type) %>%
+  dplyr::summarise(
+    mean_rel_RMSE = mean(rel_RMSE, na.rm = TRUE),
+    lon_rel_RMSE = rel_RMSE[leaf_condition == "leaf-on"],
+    loff_rel_RMSE = rel_RMSE[leaf_condition == "leaf-off"],
+    min_rel_RMSE = min(rel_RMSE, na.rm = TRUE),
+    max_rel_RMSE = max(rel_RMSE, na.rm = TRUE),
+    # determine which condition is at min/max
+    min_label = ifelse(lon_rel_RMSE <= loff_rel_RMSE, "leaf-on", "leaf-off"),
+    max_label = ifelse(lon_rel_RMSE >= loff_rel_RMSE, "leaf-on", "leaf-off"),
+    .groups = 'drop'
+  )
+
+ggplot(all_results_summary, aes(x = response_var, y = mean_rel_RMSE, fill = plot_type)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_errorbar(aes(ymin = min_rel_RMSE, ymax = max_rel_RMSE),
+                position = position_dodge(width = 0.8), width = 0.25) +
+  geom_text(aes(y = max_rel_RMSE, label = max_label), 
+            position = position_dodge(width = 0.8), vjust = -0.5, size = 2.5) +
+  geom_text(aes(y = min_rel_RMSE, label = min_label), 
+            position = position_dodge(width = 0.8), vjust = 1.5, size = 2.5) +
+  facet_wrap(~ leaf_type) +
+  labs(title = "Relative RMSE (%) by Forest Invenotry Attribute and Dominant Leaf Type",
+       subtitle = "Error bars show range between leaf-on and leaf-off",
+       x = "", 
+       y = "Relative RMSE (%)",
+       fill = "Plot Type") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# plot 2: relative RMSE separated by leaf condition and leaf type (4 panels)
 ggplot(all_results_plot, aes(x = response_var, y = rel_RMSE, fill = plot_type)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-  facet_wrap(~ leaf_type) +
-  labs(title = "Relative RMSE (%) by Response Variable and Leaf Type",
-       x = "Response Variable", 
+  facet_grid(leaf_condition ~ leaf_type) +
+  labs(title = "Relative RMSE (%) by Leaf Condition and Dominant Leaf Type",
+       x = "", 
        y = "Relative RMSE (%)",
        fill = "Plot Type") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# plot 2: relative RMSE for leaf-on only
-ggplot(all_results_plot %>% dplyr::filter(leaf_condition == "leaf-on"), 
-       aes(x = response_var, y = rel_RMSE, fill = plot_type)) +
+# plot: absolute difference between leaf-on and leaf-off (All plots and RTK remeasured only)
+ggplot(diff_lon_loff %>% dplyr::filter(plot_type %in% c("All plots", "RTK remeasured")), 
+       aes(x = response_var, y = abs_diff, fill = better_condition)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-  facet_wrap(~ leaf_type) +
-  labs(title = "Relative RMSE (%) - Leaf-on",
-       x = "Response Variable", 
-       y = "Relative RMSE (%)",
-       fill = "Plot Type") +
+  facet_grid(plot_type ~ leaf_type) +
+  scale_fill_manual(values = c("leaf-on" = "#2E7D32", "leaf-off" = "#1565C0"),
+                    name = "Better condition") +
+  labs(title = "Absolute Difference in Relative RMSE between Leaf-on and Leaf-off",
+       subtitle = "Bar color indicates which condition has lower (better) rRMSE",
+       x = "", 
+       y = "Absolute Difference in rel. RMSE (%)") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# plot 3: relative RMSE for leaf-off only
-ggplot(all_results_plot %>% dplyr::filter(leaf_condition == "leaf-off"), 
-       aes(x = response_var, y = rel_RMSE, fill = plot_type)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-  facet_wrap(~ leaf_type) +
-  labs(title = "Relative RMSE (%) - Leaf-off",
-       x = "Response Variable", 
-       y = "Relative RMSE (%)",
-       fill = "Plot Type") +
+# plot: compare leaf-on vs leaf-off differences between deciduous and coniferous
+# for All plots and RTK remeasured
+ggplot(diff_lon_loff %>% dplyr::filter(plot_type %in% c("All plots", "RTK remeasured")), 
+       aes(x = leaf_type, y = abs_diff, fill = leaf_type)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = round(abs_diff, 1)), vjust = -0.5, size = 3) +
+  facet_grid(plot_type ~ response_var) +
+  scale_fill_manual(values = c("deciduous" = "#8BC34A", "coniferous" = "#4CAF50")) +
+  labs(title = "Leaf-on vs Leaf-off Difference: Deciduous vs Coniferous",
+       subtitle = "Absolute difference in rel. RMSE (%)",
+       x = "", 
+       y = "Absolute Difference in rel. RMSE (%)") +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
 
 ##########################################################
 
