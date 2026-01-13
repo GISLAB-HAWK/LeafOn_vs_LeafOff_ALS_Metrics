@@ -7,60 +7,60 @@
 #-------------------------------------------------------------------------------
 
 
-library(terra)
-library(dplyr)
-library(tidyverse)
-library(corrplot)
-library(ggplot2)
-library(ggfortify)
+# library(terra)
+# library(dplyr)
+# library(tidyverse)
+# library(corrplot)
+# library(ggplot2)
+# library(ggfortify)
 
-setwd("R:/AG_Magdon/datensaetze/solling/dobelmann/leaf-on_leaf-off_data/04_indices/")
 
-# path to indices files 
-loff_file <- "solling24_leafoff_indices_harm.tiff"
-lon_file <-  "solling23_leafon_indices_harm.tiff"
+# source setup script
+source('src/setup.R', local = TRUE)
 
+#### Data preparation ####
 
 # read raster files  
-loff_r <- rast(loff_file) 
-lon_r <- rast(lon_file)
-
-names(loff_r[[1]]) <- "species"
-names(lon_r[[18]]) <- "species"
-
-plot(lon_r$band1)
-plot(loff_r)
+loff_r <- rast(
+  file.path(processed_data_dir, 'metrics','pix_level','solling24_loff_ppm20_indices.tiff')
+               ) 
+lon_r <- rast(
+  file.path(processed_data_dir, 'metrics','pix_level','solling23_lon_ppm20_indices.tiff')
+  )
+ 
+loff_r
+lon_r
 
 # crop to same extent 
 lon_r <- crop(lon_r, loff_r)
 
-#Create a mask: TRUE where either is NA or 0
-mask <- is.na(lon_r) | is.na(loff_r) | (lon_r == 0) | (loff_r == 0) 
-mask_single <- app(mask, fun = function(x) any(x, na.rm = TRUE))
+# mask only valid cells
+# 1. masking out NA
+is_na <- is.na(lon_r) | is.na(loff_r)
+mask_na <- app(is_na, fun = function(x) any(x, na.rm = TRUE))   
 
-# mask the two layer 
-loff_r <- mask(loff_r, mask_single, maskvalue = TRUE)
-lon_r <- mask(lon_r, mask_single, maskvalue = TRUE)
+# 2. masking out height difference >10m (assuming clearcut)
+diff <- loff_r$BE_H_MAX - lon_r$BE_H_MAX
+mask_diff <- diff <= -10
+
+# 3. masking out non forested areas 
+mask_nontree <- lon_r$DLT == 0
+
+# combine the three masks 
+mask_combined <- mask_na | mask_diff | mask_nontree
+
+# apply the mask 
+loff_r <- mask(loff_r, mask_combined, maskvalue = TRUE)
+lon_r <- mask(lon_r, mask_combined, maskvalue = TRUE)
 
 # plot some bands 
 par(mfrow = c(1,2))
-plot(loff_r)
+plot(loff_r[[2]])
 plot(lon_r[[2]])
 
-diff <- loff_r$BE_H_MAX - lon_r$BE_H_MAX
-
-mask <- diff > -10
-
-# mask the two layer where height difference is more than 10 meter 
-loff_r <- mask(loff_r, mask, maskvalue = FALSE)
-lon_r <- mask(lon_r, mask, maskvalue = FALSE)
-
-plot(lon_r[[2]])
-
-############################
 
 # Get all valid cell indices
-valid_idx <- which(values(mask))
+valid_idx <- which(!is.na(values(lon_r[[2]])))
 
 #  Randomly sample 5000 of those indices
 set.seed(123)  # for reproducibility
@@ -75,45 +75,52 @@ loff_vals <- terra::extract(loff_r, sample_pts)
 
 lon_vals  <- cbind(sample_pts, lon_vals)
 loff_vals <- cbind(sample_pts, loff_vals)
-############################
 
 # extract data
-lon_df <- as.data.frame(lon_vals,xy = TRUE, na.rm = T)
-loff_df <- as.data.frame(loff_vals, xy = TRUE, na.rm = T)
+lon_df <- as.data.frame(lon_vals,xy = TRUE, na.rm = T) 
+loff_df <- as.data.frame(loff_vals, xy = TRUE, na.rm = T) 
 
+# combine datasets and bring into long format 
 df_long <- bind_rows(
   lon_df  %>% mutate(season = "leaf on"),
   loff_df %>% mutate(season = "leaf off")
 ) %>%
-  pivot_longer(cols = -c(season, species, x, y), names_to = "variable", values_to = "value") %>%
+  pivot_longer(cols = -c(season, DLT, x, y), names_to = "variable", values_to = "value") %>%
   mutate(species = case_when(
-    species == "1" ~ "decidious",
-    species == "2" ~ "coniferous",
+    DLT == "1" ~ "decidious",
+    DLT == "2" ~ "coniferous",
     TRUE ~ NA_character_
-  ))
+  )) %>%
+  select(-DLT)
 
 # summarize the data
 df_summary <- df_long %>%
   group_by(season, variable) %>%
-  summarise(mean = mean(value), sd = sd(value))
+  dplyr::summarise(mean = mean(value), sd = sd(value), min = min(value), max = max(value))
 
-df_summary
+print(df_summary)
 
-# Pivot wide
+# brint data to wide format 
 df_wide <- df_long %>%
   pivot_wider(names_from = season, values_from = value)%>%
   rename(leaf_on = `leaf on`,
          leaf_off = `leaf off`)
 
-#### paired t.test ####
+# summarize the data
+df_summary <- df_wide %>%
+  group_by(variable) %>%
+  dplyr::summarise(mean_lon = mean(leaf_on), sd_lon = sd(leaf_on), mean_loff = mean(leaf_off), sd_loff = sd(leaf_off)) %>%
+  mutate(diff = mean_lon-mean_loff)
 
-# shapiro test for normal distribution 
-set.seed(42)  # for reproducibility
+print(df_summary)
 
+#### wilcoxon-test ####
+
+# first, testing for normal distribution 
 shapiro <- df_long %>%
   group_by(season, variable) %>%
-  summarise(
-    shapiro = list(shapiro.test(value)), # using a subsample n = 5000
+  dplyr::summarise(
+    shapiro = list(shapiro.test(value)), 
     .groups = "drop"
   ) %>%
   rowwise() %>%
@@ -122,124 +129,126 @@ shapiro <- df_long %>%
     p.value   = shapiro$p.value,
     method    = shapiro$method
   ) %>%
-  select(-shapiro)
+  select(-shapiro, -method) %>%
+  dplyr::mutate(signif = ifelse(p.value < 0.05, "***", ""))
 
-shapiro
-
+print(shapiro, n = 34)
 any(shapiro$p.value>0.05)
-which(shapiro$p.value>0.05)
 
-
-# data not normally distribute. using non-parametric wilcoxon-test instead
-
-wilcox_test <- df_long %>%
+# data not normally distributed. using non-parametric wilcoxon-test instead of simple t-test
+wilcox_test <- df_wide %>%
+  tidyr::drop_na(leaf_on, leaf_off) %>%   # remove NAs
   group_by(variable) %>%
-  summarise(
-    test = list(
-      wilcox.test(value ~ season, data = cur_data())
-    ),
+  dplyr::summarise(
+    n_pairs  = n(),
+    mean_diff = mean(leaf_on - leaf_off),  # mean difference (on - off)
+    p.value  = wilcox.test(leaf_on, leaf_off, paired = TRUE)$p.value,
     .groups = "drop"
-  ) %>%
-  rowwise() %>%
-  mutate(
-    statistic = test$statistic,
-    p.value   = test$p.value,
-    method    = test$method
-  ) %>%
-  select(-test)
+  )  %>%
+  dplyr::mutate(signif = ifelse(p.value < 0.05, "***", ""))
 
 print(wilcox_test)
 
-any(wilcox_test$p.value< 0.05)
-which(wilcox_test$p.value< 0.05)
+any(wilcox_test$p.value > 0.05)
 
-# Pivot data wider: one row per variable
-
-df_wide <- df_long %>%
-  group_by(variable, season) %>%
-  mutate(pixel_id = row_number()) %>%   # per-variable pixel index
-  ungroup() %>%
-  pivot_wider(
-    names_from  = season,
-    values_from = value
-  ) %>%
-  arrange(variable, pixel_id) %>%
-  rename(leaf_on = `leaf on`,
-         leaf_off = `leaf off`)
+# significant differences for all metrics, wilcoxon test very sensitive especially with high sample sizes 
 
 # change order of variables for later plotting
-df_wide$variable <- factor(df_wide$variable, 
-                           levels = c("BE_H_MAX","BE_H_P90","BE_H_P80","BE_H_P50","BE_H_P20",
-                                      "BE_H_P10", "BE_PR_02","BE_PR_10", "BE_RD_02", "BE_RD_10", 
-                                      "BE_H_KURTOSIS", "BE_H_SKEW", "BE_H_VAR", "BE_H_SD", "BE_H_MEAN",
-                                      "point_density", "pulse_returns_mean"))  
-df_long$variable <- factor(df_long$variable, 
-                           levels = c("BE_H_MAX","BE_H_P90","BE_H_P80","BE_H_P50","BE_H_P20",
-                                      "BE_H_P10", "BE_PR_02","BE_PR_10", "BE_RD_02", "BE_RD_10", 
-                                      "BE_H_KURTOSIS", "BE_H_SKEW", "BE_H_VAR", "BE_H_SD", "BE_H_MEAN",
-                                      "point_density", "pulse_returns_mean"))  
+lvl = c("BE_H_MAX","BE_H_P90","BE_H_P80","BE_H_P50","BE_H_P20",
+        "BE_H_P10", "BE_PR_02","BE_PR_10", "BE_RD_02", "BE_RD_10", 
+        "BE_H_KURTOSIS", "BE_H_SKEW", "BE_H_VAR", "BE_H_SD", "BE_H_MEAN",
+        "point_density", "pulse_returns_mean")
 
-## scatterplot 
+df_wide$variable <- factor(df_wide$variable, 
+                           levels = lvl )  
+df_long$variable <- factor(df_long$variable, 
+                           levels = lvl)  
+
+
+#### scatterplot ####
 s <- ggplot(df_wide, aes(x = leaf_on, y = leaf_off, colour = species)) +
-  geom_point(alpha = 0.8) +
-  #geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  geom_point() +
   geom_smooth(method = "lm", se = FALSE, linetype = "dashed", linewidth = 0.7) +
   facet_wrap(~ variable, scales = "free") +
   ggpubr::stat_cor(
-    aes(color = species, label = ..r.label..),        # <- compute a correlation per species
-    method = "pearson",
-    label.x.npc = "left",
-    cor.coef.name = "r", 
-    size = 6, 
+    aes(color = species, label = ..r.label..),        # compute a correlation per species
+    method = "spearman",
+    label.x.npc = 0,
+    label.y.npc = 0.9,
+    cor.coef.name = "rho", 
+    size = 5, 
     show.legend = FALSE,
-    na.rm = T
+    na.rm = T,
+    geom = "label",              
+    label.size = 0.001,   
+    label.padding = unit(0.10, "lines"),  
+    lineheight = 0.5,
+    fill = "white",                
+    alpha = 0.8     
   ) +
   theme_minimal() +
   scale_color_discrete(na.value = "lightgray") +
   labs(
-    title = "Comparison of Metrices on the pixel level",
+    title = "Metric comparison: area based",
+    subtitle = "n = 196, pulse density = 20ppm",
     x = "Leaf-On Value",
     y = "Leaf-Off Value"
   ) +
   theme(
-    legend.text = element_text(size = 16),  
-    axis.title = element_text(size = 18),
-    axis.text = element_text(size = 14),
-    legend.title = element_text(size = 20),      
-    strip.text = element_text(size = 17), 
-    title = element_text(size = 20)
+    legend.text = element_text(size = 14),  
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 18),      
+    strip.text = element_text(size = 15), 
+    title = element_text(size = 18)
   )
 
-s
 
-ggsave("C:/Users/sdobelma/Documents/LeafOn_vs_LeafOff_ALS/plots/pixel_scatterplot.pdf",s,  dpi = 500, width = 15, height = 10)
+print(s)
+#ggsave(paste0(output_dir,"/pix_scatterplot_ppm20.pdf"),s,  dpi = 500, width = 20, height = 10)
 
-df_summary <- df_long %>%
-  group_by(season, variable) %>%
-  summarise(mean = mean(value), sd = sd(value))
 
-## violon plot
+#### violon plot ####
 
-ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
+v <- ggplot(df_long, aes(x = season, y = value, fill = season, alpha = 0.85)) +
   geom_violin(trim = FALSE) +
-  facet_wrap(~ variable, nrow = 5, ncol = 4, scales = "free_y") +
+  facet_wrap(~ variable, nrow = 4, ncol = 5, scales = "free_y") +
   theme_minimal() +
-  labs(title = "Metric Comparison Leaf off vs. leaf on",
+  labs(title = "Metric comparison: area based ",
+       subtitle = "n = 196, pulse density = 20ppm",
        x = "",
        y = "Value") +
-  theme(legend.position = "none")
+  theme(legend.position = "none") +
+  scale_fill_manual(
+    values = c("leaf on" = "#1b9e77", 
+               "leaf off" = "#d95f02"),
+    na.value = "lightgray"
+  )
 
-## density plot
-ggplot(df_sub, aes(x = value, fill = season)) +
-  geom_density(alpha = 0.5) +
-  facet_wrap(~ variable, scales = "free", ncol = 4) +
+print(v)
+#ggsave(paste0(output_dir,"/pix_violinplot_ppm20.pdf"), v ,  dpi = 500, width = 15, height = 10)
+
+#### density plot ####
+d <- ggplot(df_long, aes(x = value, fill = season)) +
+  geom_density(alpha = 0.7) +
+  facet_wrap(~ variable, scales = "free", ncol = 5) +
   theme_minimal() +
-  labs(title = "Metric Comparison Leaf off vs. leaf on",
+  labs(title = "Metric comparison for BI plots ",
+       subtitle = "n = 196, pulse density = 20ppm",
        x = "",
        y = "Value") +
-  theme(legend.position = "none")
+  theme(legend.position = "bottom") +
+  scale_fill_manual(
+    values = c("leaf on" = "#1b9e77", 
+               "leaf off" = "#d95f02"),
+    na.value = "lightgray"
+  )
+
+print(d)
+#ggsave(paste0(output_dir,"/pix_densityplot_ppm20.pdf"), d ,  dpi = 500, width = 12, height = 10)
 
 
+#### Principle Conponent Analysis ####
 # correlations
 cor_matrix <- cor(loff_df,lon_df, use = "pairwise.complete.obs")
 round(cor_matrix,2)
@@ -268,3 +277,29 @@ combined <- bind_rows(loff_df %>% mutate(source = "df1"),
 pca <- prcomp(combined %>% select(-source), scale. = TRUE)
 summary(pca)
 autoplot(pca, data = combined, colour = "source", loadings = TRUE, loadings.label = TRUE)
+
+
+
+#### multiple linear regression ####
+
+df_long <- df_wide %>%
+  pivot_longer(
+    c(leaf_on, leaf_off),
+    names_to = "leaf_condition",
+    values_to = "value"
+  ) %>%
+  mutate(leaf_condition = factor(leaf_condition,
+                                 levels = c("leaf_off", "leaf_on")))
+
+model <- lm(
+  value ~ leaf_condition + species,
+  data = df_long %>% filter(variable == "BE_H_MEAN")
+)
+
+summary(model)
+
+#### Friedman test ####
+friedman.test(cbind(read, write, math))
+
+#### repeated measures logistic regression
+
