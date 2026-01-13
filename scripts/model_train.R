@@ -324,7 +324,7 @@ corrplot::corrplot(cor_loff_coniferous, method = 'color', type = 'full',
 
 # train random forest models
 # implementing forward feature selection
-# for all response variables, leaf types, and leaf conditions
+# for all forest inventory attributes, leaf types, and leaf conditions
 
 # define response variables with their names (for file naming)
 response_vars <- list(
@@ -518,23 +518,23 @@ for (resp in response_vars) {
   }
 }
 
-# test where differences between pred and obsv are highest using RMSE
+# test where differences between pred and obsv are highest using rel. RMSE
 
 # get model names
 model_names <- names(cv_predictions)
 
-# Loop through all 24 models
+# loop through all 24 models
 results_list <- lapply(1:length(cv_predictions), function(i) {
   
-  # Merge current model predictions with bi_plots_rtk
+  # merge current model predictions with bi_plots_rtk
   merged_data <- cv_predictions[[i]] %>%
     dplyr::left_join(sf::st_drop_geometry(bi_plots_rtk), by = "kspnr")
   
-  # Calculate squared error and absolute error for relative RMSE
+  # calculate squared error and absolute error
   merged_data$squared_error <- (merged_data$pred - merged_data$obs)^2
   merged_data$abs_error <- abs(merged_data$pred - merged_data$obs)
   
-  # Summarize by estimated status
+  # summarize by estimated status
   summary_by_estimated <- merged_data %>%
     dplyr::group_by(estimated) %>%
     dplyr::summarise(
@@ -547,7 +547,7 @@ results_list <- lapply(1:length(cv_predictions), function(i) {
       .groups = 'drop'
     )
   
-  # Summarize for all plots combined
+  # summarize for all plots combined
   summary_all <- merged_data %>%
     dplyr::summarise(
       estimated = "all",
@@ -559,7 +559,7 @@ results_list <- lapply(1:length(cv_predictions), function(i) {
       max_error = max(abs_error, na.rm = TRUE)
     )
   
-  # Combine both summaries
+  # combine both summaries
   summary_stats <- dplyr::bind_rows(summary_by_estimated, summary_all) %>%
     dplyr::mutate(model_id = i,
                   model_name = ifelse(exists("model_names"), model_names[i], paste0("model_", i)))
@@ -567,21 +567,21 @@ results_list <- lapply(1:length(cv_predictions), function(i) {
   return(summary_stats)
 })
 
-# Combine all results
+# combine all results
 all_results <- dplyr::bind_rows(results_list)
 
-# Extract response variable from model_name
+# extract response variable from model_name
 all_results <- all_results %>%
   dplyr::mutate(
-    # Extract the response variable (everything between "pred_" and "_lon" or "_loff")
+    # extract the response variable (everything between "pred_" and "_lon" or "_loff")
     response_var = gsub("pred_(.*?)_(lon|loff)_.*", "\\1", model_name),
-    # Extract leaf condition (lon/loff)
+    # extract leaf condition (lon/loff)
     leaf_condition = ifelse(grepl("_lon_", model_name), "lon", "loff"),
-    # Extract leaf type (deciduous/coniferous)
+    # extract leaf type (deciduous/coniferous)
     leaf_type = ifelse(grepl("deciduous", model_name), "deciduous", "coniferous")
   )
 
-# Aggregate by response variable and leaf type (averaged over leaf condition)
+# aggregate by response variable and leaf type (averaged over leaf condition)
 summary_by_response_leaf <- all_results %>%
   dplyr::group_by(response_var, leaf_type, estimated) %>%
   dplyr::summarise(
@@ -597,7 +597,7 @@ summary_by_response_leaf <- all_results %>%
 summary_by_response_leaf %>%
   knitr::kable(digits = 2)
 
-# Summary separated by leaf condition (no aggregation)
+# summary separated by leaf condition (no aggregation)
 summary_by_response_leaf_cond <- all_results %>%
   dplyr::group_by(response_var, leaf_type, leaf_condition, estimated) %>%
   dplyr::summarise(
