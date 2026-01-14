@@ -2,6 +2,8 @@
 # Name:         calculate_metrics.R
 # Description:  Script calculates metrics in forest inventory plots using 
 #               the point clouds from leaf-on and leaf-off season.
+#               Plot coordinates are available in two variants: 
+#               RTK-corrected and non-RTK (uncorrected).
 #               The RSDB (Remote Sensing Database) R-package is used for this.
 #               For further information see
 #               https://github.com/environmentalinformatics-marburg/rsdb-data and 
@@ -47,23 +49,30 @@ pointcloud_loff <- remotesensing$pointcloud('solling24_loff_ppm20')
 # list POI layers
 remotesensing$poi_groups
 
-# get all POIs of one POI layer
-pois <- remotesensing$poi_group('inv_attr_bi_plots_solling')
+# get all POIs of POI layer
+# once with RTK-based coordinates and once without RTK-based coordinates 
+pois_rtk <- remotesensing$poi_group('inv_attr_bi_plots_solling_rtk')
+pois_non_rtk <- remotesensing$poi_group('inv_attr_bi_plots_solling_non_rtk')
 
 # create spatial object with point geometry
-pois_sf <- sf::st_as_sf(pois, coords = c('x', 'y'), crs = 25832)
+pois_rtk_sf <- sf::st_as_sf(pois_rtk, coords = c('x', 'y'), crs = 25832)
+pois_non_rtk_sf <- sf::st_as_sf(pois_non_rtk, coords = c('x', 'y'), crs = 25832)
 
 # buffer the points
-pois_sf_buffered <- sf::st_buffer(pois_sf, dist = 13)
+pois_rtk_sf_buffered <- sf::st_buffer(pois_rtk_sf, dist = 13)
+pois_non_rtk_sf_buffered <- sf::st_buffer(pois_non_rtk_sf, dist = 13)
 
 # convert to sp format
-areas_sp <- as(pois_sf_buffered, 'Spatial')
+areas_rtk_sp <- as(pois_rtk_sf_buffered, 'Spatial')
+areas_non_rtk_sp <- as(pois_non_rtk_sf_buffered, 'Spatial')
 
 # extract the polygons objects
-polygons_list <- areas_sp@polygons
+polygons_rtk <- areas_rtk_sp@polygons
+polygons_non_rtk <- areas_non_rtk_sp@polygons
 
 # name them using kspnr
-names(polygons_list) <- pois_sf_buffered$name 
+names(polygons_rtk) <- pois_rtk_sf_buffered$name
+names(polygons_non_rtk) <- pois_non_rtk_sf_buffered$name 
 
 # set metrics to calculate
 metrics <- c(
@@ -91,12 +100,26 @@ metrics <- c(
 )
 
 # calculate indices (on the RSDB server)
-pc_lon_metrics <- pointcloud_lon$indices(areas = polygons_list, functions = metrics)
-pc_loff_metrics <- pointcloud_loff$indices(areas = polygons_list, functions = metrics)
+# leaf-on and leaf-of, RTK and non-RTK
+pc_lon_metrics_rtk <- pointcloud_lon$indices(areas = polygons_rtk, functions = metrics)
+pc_loff_metrics_rtk <- pointcloud_loff$indices(areas = polygons_rtk, functions = metrics)
+pc_lon_metrics_non_rtk <- pointcloud_lon$indices(areas = polygons_non_rtk, functions = metrics)
+pc_loff_metrics_non_rtk <- pointcloud_loff$indices(areas = polygons_non_rtk, functions = metrics)
 
 # rename id column to kspnr
-names(pc_lon_metrics)[names(pc_lon_metrics) == 'name'] <- 'kspnr'
-names(pc_loff_metrics)[names(pc_loff_metrics) == 'name'] <- 'kspnr'
+pc_metrics_list <- list(
+  pc_lon_metrics_rtk = pc_lon_metrics_rtk,
+  pc_loff_metrics_rtk = pc_loff_metrics_rtk,
+  pc_lon_metrics_non_rtk = pc_lon_metrics_non_rtk,
+  pc_loff_metrics_non_rtk = pc_loff_metrics_non_rtk
+)
+
+for (name in names(pc_metrics_list)) {
+  names(pc_metrics_list[[name]])[names(pc_metrics_list[[name]]) == 'name'] <- 'kspnr'
+}
+
+# unpack back to individual variables
+list2env(pc_metrics_list, envir = .GlobalEnv)
 
 
 
@@ -105,51 +128,57 @@ names(pc_loff_metrics)[names(pc_loff_metrics) == 'name'] <- 'kspnr'
 
 # read forest inventory plots 
 # (already clipped to the AOI and filtered, see script inv_attr_plots.R)
-inv_attr_plots <- sf::st_read(
-  file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots.gpkg')
-  )
-
-inv_attr_plots_metrics_lon <- inv_attr_plots %>%
-  dplyr::left_join(
-    pc_lon_metrics %>% dplyr::mutate(kspnr = as.integer(kspnr)), 
-    by = 'kspnr'
-  )
-
-inv_attr_plots_metrics_loff <- inv_attr_plots %>%
-  dplyr::left_join(
-    pc_loff_metrics %>% dplyr::mutate(kspnr = as.integer(kspnr)), 
-    by = 'kspnr'
-  )
-
-head(inv_attr_plots_metrics_lon)
-head(inv_attr_plots_metrics_loff)
-
-# remove columns with height information from the filtering process
-inv_attr_plots_metrics_lon <- inv_attr_plots_metrics_lon %>%
-  dplyr::select(-height_loff, -height_lon, -height_diff)
-
-inv_attr_plots_metrics_loff <- inv_attr_plots_metrics_loff %>%
-  dplyr::select(-height_loff, -height_lon, -height_diff)
-
-# no metrics can be calculated for plot 36799 in the leaf-off dataset 
-# because most of the plot area (buffered) lies outside the AOI)
-# therefore, this plot is removed also from the leaf-on dataset
-inv_attr_plots_metrics_loff <- inv_attr_plots_metrics_loff %>%
-  dplyr::filter(!is.na(BE_H_MEAN))
-
-inv_attr_plots_metrics_lon <- inv_attr_plots_metrics_lon %>%
-  dplyr::filter(kspnr %in% inv_attr_plots_metrics_loff$kspnr)
-
-# write do disk
-sf::st_write(
-  inv_attr_plots_metrics_lon,
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
-  )
-
-sf::st_write(
-  inv_attr_plots_metrics_loff,
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
+inv_attr_plots_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots_rtk.gpkg')
 )
+inv_attr_plots_non_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots_non_rtk.gpkg')
+)
+
+# join metrics with inventory data
+inv_attr_plots_metrics_lon_rtk <- inv_attr_plots_rtk %>%
+  dplyr::left_join(
+    pc_lon_metrics_rtk %>% dplyr::mutate(kspnr = as.integer(kspnr)), 
+    by = 'kspnr'
+  )
+
+inv_attr_plots_metrics_loff_rtk <- inv_attr_plots_rtk %>%
+  dplyr::left_join(
+    pc_loff_metrics_rtk %>% dplyr::mutate(kspnr = as.integer(kspnr)), 
+    by = 'kspnr'
+  )
+
+inv_attr_plots_metrics_lon_non_rtk <- inv_attr_plots_non_rtk %>%
+  dplyr::left_join(
+    pc_lon_metrics_non_rtk %>% dplyr::mutate(kspnr = as.integer(kspnr)), 
+    by = 'kspnr'
+  )
+
+inv_attr_plots_metrics_loff_non_rtk <- inv_attr_plots_non_rtk %>%
+  dplyr::left_join(
+    pc_loff_metrics_non_rtk %>% dplyr::mutate(kspnr = as.integer(kspnr)), 
+    by = 'kspnr'
+  )
+
+head(inv_attr_plots_metrics_lon_rtk)
+head(inv_attr_plots_metrics_loff_rtk)
+head(inv_attr_plots_metrics_lon_non_rtk)
+head(inv_attr_plots_metrics_loff_non_rtk)
+
+# write to disk
+output_list <- list(
+  plot_metrics_lon_rtk = inv_attr_plots_metrics_lon_rtk,
+  plot_metrics_loff_rtk = inv_attr_plots_metrics_loff_rtk,
+  plot_metrics_lon_non_rtk = inv_attr_plots_metrics_lon_non_rtk,
+  plot_metrics_loff_non_rtk = inv_attr_plots_metrics_loff_non_rtk
+)
+
+for (name in names(output_list)) {
+  sf::st_write(
+    output_list[[name]],
+    file.path(processed_data_dir, 'metrics', paste0(name, '.gpkg'))
+  )
+}
 
 
 
