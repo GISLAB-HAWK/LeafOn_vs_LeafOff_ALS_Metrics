@@ -126,166 +126,228 @@ plots_loff_non_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lof
 
 
 
-# 03 - model preparation
+# 03: CV testing
 #-------------------------------------------------------------------------------
 
-################################################################################
-#                           START DRAFT - cv testing                           #
+# define data combinations for CV comparison
+# (RTK vs non-RTK) x (deciduous vs coniferous vs all)
+# leaf-on vs leaf-off not differentiated as plot positions are the same
 
-# leave-one-out cv (loocv)
-loo_cv <- caret::createFolds(
-  1:nrow(plots_lon_coniferous), k = nrow(plots_lon_coniferous), returnTrain = F
+data_list <- list(
+  rtk_all = list(data = plot_metrics_lon_rtk, predpoints = pixel_centroids),
+  rtk_deciduous = list(data = plots_lon_rtk_deciduous, predpoints = pixel_centroids_deciduous),
+  rtk_coniferous = list(data = plots_lon_rtk_coniferous, predpoints = pixel_centroids_coniferous),
+  non_rtk_all = list(data = plot_metrics_lon_non_rtk, predpoints = pixel_centroids),
+  non_rtk_deciduous = list(data = plots_lon_non_rtk_deciduous, predpoints = pixel_centroids_deciduous),
+  non_rtk_coniferous = list(data = plots_lon_non_rtk_coniferous, predpoints = pixel_centroids_coniferous)
 )
 
-predcond_loo_cv <- CAST::geodist(
-  x = plots_lon_coniferous,
-  modeldomain = sf::st_zm(ext_loff),
-  cvfolds = loo_cv
-)
-
-# random 5-fold cross-validation (cv)
-fold5 <- caret::createFolds(1:nrow(plots_lon_coniferous), k = 5, returnTrain = F)
-
-predcond_cv_fold5 <- CAST::geodist(
-  x = plots_lon_coniferous,
-  modeldomain = sf::st_zm(ext_loff),
-  cvfolds = fold5
+# function to compute CV methods for the different datasets
+compute_cv_geodist <- function(data, predpoints, modeldomain) {
+  n <- nrow(data)
+  
+  # LOO CV
+  loo_cv <- caret::createFolds(1:n, k = n, returnTrain = F)
+  geodist_loo <- CAST::geodist(
+    x = data,
+    modeldomain = sf::st_zm(modeldomain),
+    cvfolds = loo_cv
   )
+  
+  # 5-fold CV
+  fold5 <- caret::createFolds(1:n, k = 5, returnTrain = F)
+  geodist_fold5 <- CAST::geodist(
+    x = data,
+    modeldomain = sf::st_zm(modeldomain),
+    cvfolds = fold5
+  )
+  
+  # NNDM LOO CV
+  nndm_result <- CAST::nndm(
+    tpoints = data,
+    predpoints = predpoints
+  )
+  
+  list(
+    loo_cv = loo_cv,
+    geodist_loo = geodist_loo,
+    fold5 = fold5,
+    geodist_fold5 = geodist_fold5,
+    nndm = nndm_result
+  )
+}
 
-# nearest neighbour distance matching (nndm) 
-# leave-one-out (loo) cv
-nndm <- CAST::nndm(
-  tpoints = plots_lon_coniferous,
-  #modeldomain = sf::st_transform(
-  #  sf::st_zm(ext_loff),
-  #  sf::st_crs(plots_lon_coniferous)),
-  predpoints = pixel_centroids,
-  #samplesize = 250
-)
+# compute CV for all datasets
+cv_results <- lapply(data_list, function(item) {
+  compute_cv_geodist(item$data, item$predpoints, ext_loff)
+})
 
-# k-nearest neighbour distance matching (knndm)
-knndm <- CAST::knndm(
-  tpoints = plots_lon_coniferous,
-  predpoints = pixel_centroids,
-  k = 5,
-  clustering = 'kmeans',
-)
+# plot ECDF functions for all combinations
+# LOO CV ECDF plot
+loo_plots <- lapply(names(cv_results), function(name) {
+  plot(cv_results[[name]]$geodist_loo, stat = 'ecdf') +
+    ggplot2::ggtitle(paste0('LOO CV - ', name)) +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 10))
+})
+names(loo_plots) <- names(cv_results)
 
-# plot ECDF function
-plot(predcond_loo_cv, stat = 'ecdf')
-plot(predcond_cv_fold5, stat = 'ecdf')
-plot(nndm, type = 'simple')
-plot(knndm, type = 'simple')
+# 5-fold CV ECDF plot
+fold5_plots <- lapply(names(cv_results), function(name) {
+  plot(cv_results[[name]]$geodist_fold5, stat = 'ecdf') +
+    ggplot2::ggtitle(paste0('5-fold CV - ', name)) +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 10))
+})
+names(fold5_plots) <- names(cv_results)
 
-# plot showing how nndm works
+# NNDM ECDF plot
+nndm_plots <- lapply(names(cv_results), function(name) {
+  plot(cv_results[[name]]$nndm, type = 'simple') +
+    ggplot2::ggtitle(paste0('NNDM - ', name)) +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 10))
+})
+names(nndm_plots) <- names(cv_results)
+
+# combine ECDF plots
+gridExtra::grid.arrange(grobs = loo_plots, ncol = 3, 
+                        top = 'LOO CV - ECDF Comparison')
+
+gridExtra::grid.arrange(grobs = fold5_plots, ncol = 3, 
+                        top = '5-fold CV - ECDF Comparison')
+
+gridExtra::grid.arrange(grobs = nndm_plots, ncol = 3, 
+                        top = 'NNDM - ECDF Comparison')
+
+# plot showing how NNDM works - RTK coniferous example
 # cv iteration with the most excluded plots
-id_plot <- which.max(sapply(nndm$indx_exclude, length))
-lon_coniferous_plot <- plots_lon_coniferous
-lon_coniferous_plot$set <- ""
-lon_coniferous_plot$set[nndm$indx_train[[id_plot]]] <- 'train'
-lon_coniferous_plot$set[nndm$indx_exclude[[id_plot]]] <- 'exclude'
-lon_coniferous_plot$set[nndm$indx_test[[id_plot]]] <- 'test'
-lon_coniferous_plot <- lon_coniferous_plot[order(lon_coniferous_plot$set),]
+nndm_rtk_coniferous <- cv_results$rtk_coniferous$nndm
+id_plot_coniferous <- which.max(sapply(nndm_rtk_coniferous$indx_exclude, length))
+
+rtk_coniferous_plot <- plots_lon_rtk_coniferous
+rtk_coniferous_plot$set <- ""
+rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_train[[id_plot_coniferous]]] <- 'train'
+rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_exclude[[id_plot_coniferous]]] <- 'exclude'
+rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_test[[id_plot_coniferous]]] <- 'test'
+rtk_coniferous_plot <- rtk_coniferous_plot[order(rtk_coniferous_plot$set),]
 
 ggplot() +
   geom_sf(data = ext_loff, fill = 'grey', alpha = 0.1) +
-  geom_sf(data = lon_coniferous_plot, aes(col = set)) +
+  geom_sf(data = rtk_coniferous_plot, aes(col = set)) +
   scale_color_brewer(palette = 'Dark2') +
-  theme_bw()
+  theme_bw() +
+  ggtitle('NNDM visualization - RTK coniferous',
+          subtitle = 'CV iteration with most excluded plots')
 
-# plot showing how knndm works
+# plot showing how NNDM works - RTK deciduous example
+# cv iteration with the most excluded plots
+nndm_rtk_deciduous <- cv_results$rtk_deciduous$nndm
+id_plot_deciduous <- which.max(sapply(nndm_rtk_deciduous$indx_exclude, length))
+
+rtk_deciduous_plot <- plots_lon_rtk_deciduous
+rtk_deciduous_plot$set <- ""
+rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_train[[id_plot_deciduous]]] <- 'train'
+rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_exclude[[id_plot_deciduous]]] <- 'exclude'
+rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_test[[id_plot_deciduous]]] <- 'test'
+rtk_deciduous_plot <- rtk_deciduous_plot[order(rtk_deciduous_plot$set),]
+
 ggplot() +
-  geom_sf(data = ext_loff, fill = "grey", alpha = 0.1) +
-  geom_sf(data = plots_lon_coniferous, aes(col = as.factor(knndm$clusters))) +
+  geom_sf(data = ext_loff, fill = 'grey', alpha = 0.1) +
+  geom_sf(data = rtk_deciduous_plot, aes(col = set)) +
   scale_color_brewer(palette = 'Dark2') +
-  theme_bw() + theme(legend.position = 'none')
+  theme_bw() +
+  ggtitle('NNDM visualization - RTK deciduous',
+          subtitle = 'CV iteration with most excluded plots')
 
-# highlight the clusters in knndm
-ggplot() +
-  geom_sf(data = ext_loff, fill = "grey", alpha = 0.1) +
-  geom_sf(data = plots_lon_coniferous, 
-          aes(col = as.factor(knndm$clusters)), alpha = 0.3) +
-  geom_sf(data = plots_lon_coniferous[knndm$clusters == 5, ], 
-          col = "black", size = 2) +
-  theme_bw() + theme(legend.position = 'none')
-
-# fit models and estimate their performance
-# loo cv
-vol_ha_lon_loo_ctrl <- caret::trainControl(method = 'LOOCV', savePredictions = T)
-vol_ha_lon_loo_mod <- caret::train(
-  plots_lon_coniferous_df[,12:length(plots_lon_coniferous_df)],
-  plots_lon_coniferous_df[,'total_vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_loo_ctrl,
-  ntree = 100,
-  tuneLength = 1
+# fit models and estimate their performance (RTK and leaf-on only)
+data_df_list <- list(
+  rtk_all = plots_lon_rtk_all_df,
+  rtk_deciduous = plots_lon_rtk_deciduous_df,
+  rtk_coniferous = plots_lon_rtk_coniferous_df
 )
-CAST::global_validation(vol_ha_lon_loo_mod)
 
-# 5-fold cv
-vol_ha_lon_fold5_ctrl <- caret::trainControl(
-  method = 'cv', number = 5, savePredictions = T
+# function to fit RF models with different CV methods
+fit_cv_models <- function(data_df, nndm_result, predictor_start_col = 13) {
+  
+  # LOO CV
+  loo_ctrl <- caret::trainControl(method = 'LOOCV', savePredictions = T)
+  loo_mod <- caret::train(
+    data_df[, predictor_start_col:ncol(data_df)],
+    data_df[, 'total_vol_ha'],
+    method = 'rf',
+    importance = F,
+    trControl = loo_ctrl,
+    ntree = 100,
+    tuneLength = 1
   )
-vol_ha_lon_fold5_mod <- caret::train(
-  plots_lon_coniferous_df[,12:length(plots_lon_coniferous_df)],
-  plots_lon_coniferous_df[,'total_vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_fold5_ctrl,
-  ntree = 100,
-  tuneLength = 1
-)
-CAST::global_validation(vol_ha_lon_fold5_mod)
+  
+  # 5-fold CV
+  fold5_ctrl <- caret::trainControl(method = 'cv', number = 5, savePredictions = T)
+  fold5_mod <- caret::train(
+    data_df[, predictor_start_col:ncol(data_df)],
+    data_df[, 'total_vol_ha'],
+    method = 'rf',
+    importance = F,
+    trControl = fold5_ctrl,
+    ntree = 100,
+    tuneLength = 1
+  )
+  
+  # NNDM LOO CV
+  nndm_ctrl <- caret::trainControl(
+    method = 'cv',
+    index = nndm_result$indx_train,
+    indexOut = nndm_result$indx_test,
+    savePredictions = T
+  )
+  nndm_mod <- caret::train(
+    data_df[, predictor_start_col:ncol(data_df)],
+    data_df[, 'total_vol_ha'],
+    method = 'rf',
+    importance = F,
+    trControl = nndm_ctrl,
+    ntree = 100,
+    tuneLength = 1
+  )
+  
+  list(
+    loo = loo_mod,
+    fold5 = fold5_mod,
+    nndm = nndm_mod
+  )
+}
 
-# nndm loo cv
-vol_ha_lon_nndm_ctrl <- caret::trainControl(
-  method = 'cv',
-  index = nndm$indx_train,
-  indexOut = nndm$indx_test,
-  savePredictions = T
-)
-vol_ha_lon_nndm_mod <- caret::train(
-  plots_lon_coniferous_df[,12:length(plots_lon_coniferous_df)],
-  plots_lon_coniferous_df[,'total_vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_nndm_ctrl,
-  ntree = 100,
-  tuneLength = 1
-)
-CAST::global_validation(vol_ha_lon_nndm_mod)
+# fit models for all datasets
+cv_models <- lapply(names(data_df_list), function(name) {
+  message(paste0('Fitting models for: ', name))
+  fit_cv_models(
+    data_df = data_df_list[[name]],
+    nndm_result = cv_results[[name]]$nndm
+  )
+})
+names(cv_models) <- names(data_df_list)
 
-# knndm cv
-vol_ha_lon_knndm_ctrl <- caret::trainControl(
-  method = 'cv',
-  index = knndm$indx_train,
-  indexOut = knndm$indx_test,
-  savePredictions = T
-)
-vol_ha_lon_knndm_mod <- caret::train(
-  plots_lon_coniferous_df[,12:length(plots_lon_coniferous_df)],
-  plots_lon_coniferous_df[,'total_vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_knndm_ctrl,
-  ntree = 100,
-  tuneLength = 1
-)
-CAST::global_validation(vol_ha_lon_knndm_mod)
+# create results table for all datasets
+cv_validation_results <- do.call(rbind, lapply(names(cv_models), function(name) {
+  rbind(
+    data.frame(
+      data = name,
+      validation = 'LOO CV',
+      t(as.data.frame(CAST::global_validation(cv_models[[name]]$loo)))
+    ),
+    data.frame(
+      data = name,
+      validation = '5-fold CV',
+      t(as.data.frame(CAST::global_validation(cv_models[[name]]$fold5)))
+    ),
+    data.frame(
+      data = name,
+      validation = 'NNDM LOO CV',
+      t(as.data.frame(CAST::global_validation(cv_models[[name]]$nndm)))
+    )
+  )
+}))
 
-# table with results
-rbind(
-  data.frame(outcome="GSV", validation="LOO CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_loo_mod)))),
-  data.frame(outcome="GSV", validation="5-fold CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_fold5_mod)))),
-  data.frame(outcome="GSV", validation="NNDM LOO CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_nndm_mod)))),
-  data.frame(outcome="GSV", validation="kNNDM LOO CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_knndm_mod))))
-) |> 
-  knitr::kable(digits=2, row.names = F)
+cv_validation_results |> 
+  knitr::kable(digits = 2, row.names = F)
 
 
 
