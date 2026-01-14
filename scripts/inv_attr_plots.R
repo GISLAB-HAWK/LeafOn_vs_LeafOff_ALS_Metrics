@@ -8,7 +8,7 @@
 #               basal area [m³/ha], and quadratic mean diameter (QMD) [cm].
 #               The plots with the calculated forest attributes are clipped to the area of interest (AOI),
 #               which is the area covered by both leaf-off and leaf-on airborne laser scanning (ALS) datasets.
-#               Some plots were were remeasured with RTK-GNSS. Where available, the corrected coordinates of these plots are used.
+#               Most of the plots were were remeasured with RTK-GNSS. Where available, the corrected coordinates of these plots are used.
 #               Plots with a defined vegetation height change between leaf-on and leaf-off that cannot be attributed to seasonal differences,
 #               but rather to treefall (harvest, natural disturbance), are removed.
 # Author:       Christoph Fischer, Georgia Reeves, Florian Franz
@@ -59,25 +59,34 @@ head(bi_points)
 head(bi_trees)
 
 # read remeasured plots (RTK-GNSS)
-bi_plots_rtk_1 <- sf::st_read(file.path(bi_path, 'bi_center_points_rtk.gpkg'))
-bi_plots_rtk_2 <- sf::st_read(file.path(bi_path, 'remeasured_plots.shp'))
+bi_plots_rtk_1 <- sf::st_read(file.path(bi_path, 'bi_center_points_rtk_1.gpkg'))
+bi_plots_rtk_2 <- sf::st_read(file.path(bi_path, 'bi_center_points_rtk_2.shp'))
 
 # clean up bi_plots_rtk_1: 
 # - create kspnr column from KSPNR
 # - rename geometry column to 'geometry' for consistency
 bi_plots_rtk_1$kspnr <- bi_plots_rtk_1$KSPNR
+bi_plots_rtk_1$rtk_position_estimated <- 'no'
 sf::st_geometry(bi_plots_rtk_1) <- 'geometry'
 
 # clean up bi_plots_rtk_2:
-# - remove trailing letters (e.g. "e" or "b") from Name column to get kspnr
+# - remove plots with empty geometries
+# - create estimated column based on whether Name ends with "e"
+# - remove trailing letters from Name column to get kspnr
 # - drop Z dimension from geometry
+# - remove duplicates: if a kspnr appears twice, keep the one with estimated = "yes"
+bi_plots_rtk_2 <- bi_plots_rtk_2[!sf::st_is_empty(bi_plots_rtk_2), ]
+bi_plots_rtk_2$rtk_position_estimated <- ifelse(grepl('e$', bi_plots_rtk_2$Name), 'yes', 'no')
 bi_plots_rtk_2$kspnr <- as.integer(gsub('[a-zA-Z]$', '', bi_plots_rtk_2$Name))
 bi_plots_rtk_2 <- sf::st_zm(bi_plots_rtk_2, drop = T, what = 'ZM')
+bi_plots_rtk_2 <- bi_plots_rtk_2 %>%
+  dplyr::arrange(kspnr, dplyr::desc(rtk_position_estimated)) %>%
+  dplyr::filter(!duplicated(kspnr))
 
-# merge both RTK datasets, keeping only geometry and kspnr
+# merge both RTK datasets, keeping geometry, kspnr, and estimated
 bi_plots_rtk <- rbind(
-  bi_plots_rtk_1[, 'kspnr'],
-  bi_plots_rtk_2[, 'kspnr']
+  bi_plots_rtk_1[, c('kspnr', 'rtk_position_estimated')],
+  bi_plots_rtk_2[, c('kspnr', 'rtk_position_estimated')]
 )
 
 head(bi_plots_rtk)
@@ -480,6 +489,14 @@ matching_plots <- inv_attr_plots_utm$kspnr %in% bi_plots_rtk$kspnr
 # mark remeasured plots
 inv_attr_plots_utm$remeasured[matching_plots] <- 'yes'
 
+# add rtk_position_estimated information bi_plots_rtk
+# NA for plots without RTK position
+inv_attr_plots_utm <- dplyr::left_join(
+  inv_attr_plots_utm,
+  sf::st_drop_geometry(bi_plots_rtk[, c('kspnr', 'rtk_position_estimated')]),
+  by = 'kspnr'
+)
+
 # create sf object with non-RTK geometries (without RTK position)
 remeasured_plots_non_rtk <- inv_attr_plots_utm[matching_plots, ]
 
@@ -541,6 +558,25 @@ remeasured_plots_non_rtk_aoi <- remeasured_plots_non_rtk_aoi[, original_cols_rem
 remeasured_plots_rtk_aoi <- sf::st_intersection(remeasured_plots_rtk, aoi)
 remeasured_plots_rtk_aoi <- remeasured_plots_rtk_aoi[, original_cols_remeasured]
 
+# remove plots from non-RTK data that are outside AOI based on RTK position
+remeasured_plots_non_rtk_aoi <- remeasured_plots_non_rtk_aoi[
+  remeasured_plots_non_rtk_aoi$kspnr %in% remeasured_plots_rtk_aoi$kspnr, 
+]
+
+# manually remove plots that are inside the AOI extent
+# but actually have no point cloud data
+plots_no_pc_data <- c(36799, 49472, 50442, 60283)
+inv_attr_plots_aoi <- inv_attr_plots_aoi[
+  !inv_attr_plots_aoi$kspnr %in% plots_no_pc_data, 
+]
+remeasured_plots_non_rtk_aoi <- remeasured_plots_non_rtk_aoi[
+  !remeasured_plots_non_rtk_aoi$kspnr %in% plots_no_pc_data, 
+]
+remeasured_plots_rtk_aoi <- remeasured_plots_rtk_aoi[
+  !remeasured_plots_rtk_aoi$kspnr %in% plots_no_pc_data, 
+]
+
+cat('Plots (remeasured and not remeasured) in AOI:', nrow(inv_attr_plots_aoi), '\n')
 cat('Remeasured plots (non-RTK) in AOI:', nrow(remeasured_plots_non_rtk_aoi), '\n')
 cat('Remeasured plots (RTK) in AOI:', nrow(remeasured_plots_rtk_aoi), '\n')
 
@@ -633,6 +669,9 @@ if (file.exists(excluded_plots_file)) {
       chm <- do.call(terra::merge, chm_list)
     }
     
+    # set CRS of CHM to match plots
+    terra::crs(chm) <- sf::st_crs(plots)$wkt
+    
     # extract mean height within each plot
     plot_heights <- exactextractr::exact_extract(
       chm,
@@ -705,6 +744,21 @@ if (!is.null(remeasured_plots_non_rtk_aoi) && !is.null(remeasured_plots_rtk_aoi)
   cat('Remeasured (non-RTK):', nrow(remeasured_plots_non_rtk_aoi_filtered), '/', nrow(remeasured_plots_non_rtk_aoi), '\n')
   cat('Remeasured (RTK):', nrow(remeasured_plots_rtk_aoi_filtered), '/', nrow(remeasured_plots_rtk_aoi), '\n')
 }
+
+# manually remove plots with tree fall (at least one tree)
+# identified through visual CHM comparison
+# (not captured by height difference threshold)
+plots_tree_fall <- c(41400, 44026, 49013, 52866)
+inv_attr_plots_aoi_filtered <- inv_attr_plots_aoi_filtered[
+  !inv_attr_plots_aoi_filtered$kspnr %in% plots_tree_fall,
+]
+remeasured_plots_non_rtk_aoi_filtered <- remeasured_plots_non_rtk_aoi_filtered[
+  !remeasured_plots_non_rtk_aoi_filtered$kspnr %in% plots_tree_fall,
+]
+remeasured_plots_rtk_aoi_filtered <- remeasured_plots_rtk_aoi_filtered[
+  !remeasured_plots_rtk_aoi_filtered$kspnr %in% plots_tree_fall,
+]
+cat('Removed', length(plots_tree_fall), 'plots with tree fall\n')
 
 # summary statistics
 summary(inv_attr_plots_aoi_filtered)
