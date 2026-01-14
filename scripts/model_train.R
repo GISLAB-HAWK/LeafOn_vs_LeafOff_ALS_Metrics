@@ -26,19 +26,29 @@ source('src/setup.R', local = TRUE)
 #-------------------------------------------------------------------------------
 
 # read data with forest inventory plots (BI) 
-# and calculated metrics (leaf-on and leaf-off)
-plot_metrics_lon <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
+# and calculated metrics (leaf-on and leaf-off, RTK and non-RTK)
+plot_metrics_lon_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon_rtk.gpkg')
 )
 
-plot_metrics_loff <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
+plot_metrics_loff_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff_rtk.gpkg')
 )
 
-head(plot_metrics_lon)
-head(plot_metrics_lon)
-str(plot_metrics_lon)
-str(plot_metrics_loff)
+plot_metrics_lon_non_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon_non_rtk.gpkg')
+)
+
+plot_metrics_loff_non_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff_non_rtk.gpkg')
+)
+
+head(plot_metrics_lon_rtk)
+head(plot_metrics_loff_rtk)
+head(plot_metrics_lon_non_rtk)
+head(plot_metrics_loff_non_rtk)
+str(plot_metrics_lon_rtk)
+str(plot_metrics_loff_rtk)
 
 # read extent of the leaf-off dataset
 ext_loff <- sf::st_read(
@@ -47,7 +57,7 @@ ext_loff <- sf::st_read(
 
 # read pixel centroids from w2w-metrics raster
 pixel_centroids <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'pixel_centroids_dom_leaf_type.gpkg')
+  file.path(processed_data_dir, 'metrics', 'pixel_centroids.gpkg')
   )
 
 # split pixel centroids based on dominant leaf type
@@ -70,24 +80,49 @@ pixel_centroids_coniferous <- pixel_centroids %>%
 # 02: data preparation
 #-------------------------------------------------------------------------------
 
-# filter plots by dominant leaf type
-plots_lon_deciduous <- plot_metrics_lon %>%
+# filter plots by dominant leaf type (leaf-on RTK)
+plots_lon_rtk_deciduous <- plot_metrics_lon_rtk %>%
   dplyr::filter(dominant_leaf_type == 'deciduous')
-
-plots_lon_coniferous <- plot_metrics_lon %>%
+plots_lon_rtk_coniferous <- plot_metrics_lon_rtk %>%
   dplyr::filter(dominant_leaf_type == 'coniferous')
 
-plots_loff_deciduous <- plot_metrics_loff %>%
+# filter plots by dominant leaf type (leaf-off RTK)
+plots_loff_rtk_deciduous <- plot_metrics_loff_rtk %>%
   dplyr::filter(dominant_leaf_type == 'deciduous')
-
-plots_loff_coniferous <- plot_metrics_loff %>%
+plots_loff_rtk_coniferous <- plot_metrics_loff_rtk %>%
   dplyr::filter(dominant_leaf_type == 'coniferous')
 
-# df versions
-plots_lon_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_deciduous))
-plots_lon_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_coniferous))
-plots_loff_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_deciduous))
-plots_loff_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_coniferous))
+# filter plots by dominant leaf type (leaf-on non-RTK)
+plots_lon_non_rtk_deciduous <- plot_metrics_lon_non_rtk %>%
+  dplyr::filter(dominant_leaf_type == 'deciduous')
+plots_lon_non_rtk_coniferous <- plot_metrics_lon_non_rtk %>%
+  dplyr::filter(dominant_leaf_type == 'coniferous')
+
+# filter plots by dominant leaf type (leaf-off non-RTK)
+plots_loff_non_rtk_deciduous <- plot_metrics_loff_non_rtk %>%
+  dplyr::filter(dominant_leaf_type == 'deciduous')
+plots_loff_non_rtk_coniferous <- plot_metrics_loff_non_rtk %>%
+  dplyr::filter(dominant_leaf_type == 'coniferous')
+
+# df versions (leaf-on RTK)
+plots_lon_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon_rtk))
+plots_lon_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_rtk_deciduous))
+plots_lon_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_rtk_coniferous))
+
+# df versions (leaf-off RTK)
+plots_loff_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff_rtk))
+plots_loff_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_rtk_deciduous))
+plots_loff_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_rtk_coniferous))
+
+# df versions (leaf-on non-RTK)
+plots_lon_non_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon_non_rtk))
+plots_lon_non_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_non_rtk_deciduous))
+plots_lon_non_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_non_rtk_coniferous))
+
+# df versions (leaf-off non-RTK)
+plots_loff_non_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff_non_rtk))
+plots_loff_non_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_non_rtk_deciduous))
+plots_loff_non_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_non_rtk_coniferous))
 
 
 
