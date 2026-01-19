@@ -679,7 +679,9 @@ results_list <- lapply(seq_along(cv_predictions), function(i) {
       mean_obs = mean(obs, na.rm = T),
       rel_RMSE = sqrt(mean(squared_error, na.rm = T)) / mean(obs, na.rm = T) * 100,
       MAE = mean(abs_error, na.rm = T),
-      max_error = max(abs_error, na.rm = T)
+      max_error = max(abs_error, na.rm = T),
+      bias = mean(pred - obs, na.rm = T),
+      rel_bias = mean(pred - obs, na.rm = T) / mean(obs, na.rm = T) * 100
     ) %>%
     dplyr::mutate(
       model_id = i,
@@ -726,17 +728,21 @@ all_results <- all_results %>%
 
 # display full results table
 all_results %>%
-  dplyr::select(response_var, positioning, leaf_condition, leaf_type, n, RMSE, rel_RMSE, MAE) %>%
+  dplyr::select(
+    response_var, positioning, leaf_condition, leaf_type,
+    n, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
   dplyr::arrange(response_var, positioning, leaf_condition, leaf_type) %>%
   knitr::kable(digits = 2)
 
 # compare RTK vs non-RTK for corresponding combinations
 pos_comparison <- all_results %>%
-  dplyr::select(response_var, positioning, leaf_condition, leaf_type, n, RMSE, rel_RMSE, MAE) %>%
+  dplyr::select(
+    esponse_var, positioning, leaf_condition, leaf_type,
+    n, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
   tidyr::pivot_wider(
     id_cols = c(response_var, leaf_condition, leaf_type),
     names_from = positioning,
-    values_from = c(n, RMSE, rel_RMSE, MAE),
+    values_from = c(n, RMSE, rel_RMSE, MAE, bias, rel_bias),
     names_glue = '{positioning}_{.value}'
   ) %>%
   dplyr::mutate(
@@ -744,6 +750,8 @@ pos_comparison <- all_results %>%
     diff_RMSE = rtk_RMSE - non_rtk_RMSE,
     diff_rel_RMSE = rtk_rel_RMSE - non_rtk_rel_RMSE,
     diff_MAE = rtk_MAE - non_rtk_MAE,
+    diff_bias = rtk_bias - non_rtk_bias,
+    diff_rel_bias = rtk_rel_bias - non_rtk_rel_bias,
     # determine which is better (lower error = better)
     better_positioning = ifelse(rtk_rel_RMSE < non_rtk_rel_RMSE, 'rtk', 'non_rtk'),
     # relative improvement (%)
@@ -753,7 +761,8 @@ pos_comparison <- all_results %>%
 # display RTK vs non-RTK comparison
 pos_comparison %>%
   dplyr::select(response_var, leaf_condition, leaf_type, 
-                rtk_rel_RMSE, non_rtk_rel_RMSE, diff_rel_RMSE, 
+                rtk_rel_RMSE, non_rtk_rel_RMSE, diff_rel_RMSE,
+                rtk_rel_bias, non_rtk_rel_bias, diff_rel_bias,
                 better_positioning, rel_improvement) %>%
   dplyr::arrange(response_var, leaf_condition, leaf_type) %>%
   knitr::kable(digits = 2)
