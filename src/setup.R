@@ -180,7 +180,7 @@ load_packages <- function(packages, github_remotes = NULL, github_repos = NULL) 
 }
 
 load_packages(
-  c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2',
+  c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2','ggpubr',
     'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST',
     'parallel', 'doParallel', 'tidyverse', 'corrplot','patchwork'),
   github_remotes = c(TreeGrOSSinR = 'rnuske/TreeGrOSSinR', future = 'futureverse/future'),

@@ -6,15 +6,6 @@
 # Contact:      svenja.dobelmann@hawk.de
 #-------------------------------------------------------------------------------
 
-
-# library(terra)
-# library(dplyr)
-# library(tidyverse)
-# library(corrplot)
-# library(ggplot2)
-# library(ggfortify)
-
-
 # source setup script
 source('src/setup.R', local = TRUE)
 
@@ -28,8 +19,6 @@ lon_r <- rast(
   file.path(processed_data_dir, 'metrics','pix_level','solling23_lon_ppm20_indices.tiff')
   )
  
-loff_r
-lon_r
 
 # crop to same extent 
 lon_r <- crop(lon_r, loff_r)
@@ -166,46 +155,64 @@ df_long$variable <- factor(df_long$variable,
 
 
 #### scatterplot ####
-s <- ggplot(df_wide, aes(x = leaf_on, y = leaf_off, colour = species)) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE, linetype = "dashed", linewidth = 0.7) +
-  facet_wrap(~ variable, scales = "free") +
+
+panel_labels <- df_wide %>%
+  distinct(variable) %>%
+  arrange(variable) %>%              # ensures stable order
+  mutate(
+    label = paste0(letters[seq_along(variable)], ")")
+  )
+
+cols <- c(
+  decidious  = "#1b9e77",
+  coniferous = "#d95f02"
+)
+
+s <- ggplot(df_wide, aes(x = leaf_on, y = leaf_off, colour = species, linetype = species)) +
+  geom_point(alpha = 0.3, size = 0.7,aes(shape = species)) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7, color = "grey20") +
+  facet_wrap(~ variable, labeller = as_labeller(letter_labeller), scales = "free", ncol = 3, nrow = 8) +
+  geom_text(
+    data = panel_labels,
+    aes(label = label),
+    x = -Inf, y = Inf,                # top-left corner
+    hjust = -0.4, vjust = 1.4,
+    size = 3,
+    inherit.aes = FALSE
+  ) + 
   ggpubr::stat_cor(
-    aes(color = species, label = ..r.label..),        # compute a correlation per species
+    aes(label = ..r.label..),
     method = "spearman",
-    label.x.npc = 0,
-    label.y.npc = 0.9,
-    cor.coef.name = "rho", 
-    size = 5, 
+    cor.coef.name = "rho",
+    size = 2.5,
     show.legend = FALSE,
-    na.rm = T,
-    geom = "label",              
-    label.size = 0.001,   
-    label.padding = unit(0.10, "lines"),  
-    lineheight = 0.5,
-    fill = "white",                
-    alpha = 0.8     
-  ) +
-  theme_minimal() +
-  scale_color_discrete(na.value = "lightgray") +
+    na.rm = TRUE,
+    geom = "text",          
+    label.x.npc = 0.7,    
+    label.y.npc = 0.2, 
+    lineheight = 0.7 
+  ) + 
+  theme_classic(base_size = 12) +
   labs(
-    title = "Metric comparison: area based",
-    subtitle = "n = 196, pulse density = 20ppm",
     x = "Leaf-On Value",
     y = "Leaf-Off Value"
   ) +
   theme(
-    legend.text = element_text(size = 14),  
-    axis.title = element_text(size = 16),
-    axis.text = element_text(size = 12),
-    legend.title = element_text(size = 18),      
-    strip.text = element_text(size = 15), 
-    title = element_text(size = 18)
+    legend.text = element_text(size = 10),  
+    axis.title = element_text(size = 10, color = "darkgrey"),
+    axis.text = element_text(size = 8, color = "darkgrey"),
+    axis.ticks = element_line(color = "darkgrey"),
+    axis.line = element_line(color = "darkgrey"),
+    legend.title = element_blank(), 
+    legend.position = c(0.97, 0),
+    legend.justification = c("right", "bottom"),
+    strip.text = element_blank(), 
+    panel.spacing = unit(0.6, "lines")
   )
 
 
 print(s)
-#ggsave(paste0(output_dir,"/pix_scatterplot_ppm20.pdf"),s,  dpi = 500, width = 20, height = 10)
+ggsave(paste0(output_dir,"/pix_scatterplot_ppm20.png"),s, units = "cm", dpi = 350, width = 14, height = 20)
 
 
 #### violon plot ####
