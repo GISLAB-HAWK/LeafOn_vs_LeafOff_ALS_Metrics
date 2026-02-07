@@ -737,7 +737,7 @@ all_results %>%
 # compare RTK vs non-RTK for corresponding combinations
 pos_comparison <- all_results %>%
   dplyr::select(
-    esponse_var, positioning, leaf_condition, leaf_type,
+    response_var, positioning, leaf_condition, leaf_type,
     n, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
   tidyr::pivot_wider(
     id_cols = c(response_var, leaf_condition, leaf_type),
@@ -832,7 +832,16 @@ forest_inv_order <- c('AGB', 'VOL_Tot', 'VOL_Merch', 'BA', 'QMD', 'TD')
 data_visual <- all_results %>%
   dplyr::mutate(
     leaf_condition_label = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
-    response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order)
+    response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order),
+    # rename and set order
+    leaf_type = factor(
+      dplyr::case_when(
+        leaf_type == 'all' ~ 'coniferous and deciduous combined (n = 170)',
+        leaf_type == 'deciduous' ~ 'deciduous (n = 139)',
+        leaf_type == 'coniferous' ~ 'coniferous (n = 31)'
+      ),
+      levels = c('coniferous and deciduous combined (n = 170)', 'deciduous (n = 139)', 'coniferous (n = 31)')
+    )
   ) %>%
   dplyr::group_by(response_var, response_var_label, positioning, leaf_type) %>%
   dplyr::summarise(
@@ -867,7 +876,9 @@ ggplot(data_visual, aes(x = response_var_label, y = mean_rel_RMSE, fill = positi
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         strip.background = element_rect(fill = 'lightgrey'),
-        strip.text = element_text(face = 'bold'))
+        strip.text = element_text(face = 'bold'),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank())
 
 # plot: same but separated by leaf condition 
 # (6 panels: 2 leaf conditions x 3 leaf types)
@@ -889,8 +900,18 @@ ggplot(all_results %>%
 
 # plot: difference between RTK and non-RTK (improvement)
 ggplot(pos_comparison %>%
-         dplyr::mutate(leaf_condition = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
-                       response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order)), 
+         dplyr::mutate(
+           leaf_condition = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
+           response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order),
+           leaf_type = factor(
+             dplyr::case_when(
+               leaf_type == 'all' ~ 'coniferous and deciduous combined (n = 170)',
+               leaf_type == 'deciduous' ~ 'deciduous (n = 139)',
+               leaf_type == 'coniferous' ~ 'coniferous (n = 31)'
+             ),
+             levels = c('coniferous and deciduous combined (n = 170)', 'deciduous (n = 139)', 'coniferous (n = 31)')
+           )
+         ),  
        aes(x = response_var_label, y = rel_improvement, fill = rel_improvement > 0)) +
   geom_col(width = 0.7) +
   geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey40') +
@@ -903,7 +924,9 @@ ggplot(pos_comparison %>%
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         strip.background = element_rect(fill = 'lightgrey'),
-        strip.text = element_text(face = 'bold'))
+        strip.text = element_text(face = 'bold'),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank())
 
 ##########################################################
 
