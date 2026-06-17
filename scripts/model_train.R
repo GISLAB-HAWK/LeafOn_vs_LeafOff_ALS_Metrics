@@ -26,19 +26,29 @@ source('src/setup.R', local = TRUE)
 #-------------------------------------------------------------------------------
 
 # read data with forest inventory plots (BI) 
-# and calculated metrics (leaf-on and leaf-off)
-plot_metrics_lon <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
+# and calculated metrics (leaf-on and leaf-off, RTK and non-RTK)
+plot_metrics_lon_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon_rtk.gpkg')
 )
 
-plot_metrics_loff <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
+plot_metrics_loff_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff_rtk.gpkg')
 )
 
-head(plot_metrics_lon)
-head(plot_metrics_lon)
-str(plot_metrics_lon)
-str(plot_metrics_loff)
+plot_metrics_lon_non_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon_non_rtk.gpkg')
+)
+
+plot_metrics_loff_non_rtk <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff_non_rtk.gpkg')
+)
+
+head(plot_metrics_lon_rtk)
+head(plot_metrics_loff_rtk)
+head(plot_metrics_lon_non_rtk)
+head(plot_metrics_loff_non_rtk)
+str(plot_metrics_lon_rtk)
+str(plot_metrics_loff_rtk)
 
 # read extent of the leaf-off dataset
 ext_loff <- sf::st_read(
@@ -47,7 +57,7 @@ ext_loff <- sf::st_read(
 
 # read pixel centroids from w2w-metrics raster
 pixel_centroids <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'pixel_centroids_dom_leaf_type.gpkg')
+  file.path(processed_data_dir, 'metrics', 'pixel_centroids.gpkg')
   )
 
 # split pixel centroids based on dominant leaf type
@@ -70,236 +80,395 @@ pixel_centroids_coniferous <- pixel_centroids %>%
 # 02: data preparation
 #-------------------------------------------------------------------------------
 
-# filter plots by dominant leaf type
-plots_lon_deciduous <- plot_metrics_lon %>%
+# filter plots by dominant leaf type (leaf-on RTK)
+plots_lon_rtk_deciduous <- plot_metrics_lon_rtk %>%
   dplyr::filter(dominant_leaf_type == 'deciduous')
-
-plots_lon_coniferous <- plot_metrics_lon %>%
+plots_lon_rtk_coniferous <- plot_metrics_lon_rtk %>%
   dplyr::filter(dominant_leaf_type == 'coniferous')
 
-plots_loff_deciduous <- plot_metrics_loff %>%
+# filter plots by dominant leaf type (leaf-off RTK)
+plots_loff_rtk_deciduous <- plot_metrics_loff_rtk %>%
   dplyr::filter(dominant_leaf_type == 'deciduous')
-
-plots_loff_coniferous <- plot_metrics_loff %>%
+plots_loff_rtk_coniferous <- plot_metrics_loff_rtk %>%
   dplyr::filter(dominant_leaf_type == 'coniferous')
 
-# df versions
-plots_lon_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_deciduous))
-plots_lon_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_coniferous))
-plots_loff_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_deciduous))
-plots_loff_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_coniferous))
+# filter plots by dominant leaf type (leaf-on non-RTK)
+plots_lon_non_rtk_deciduous <- plot_metrics_lon_non_rtk %>%
+  dplyr::filter(dominant_leaf_type == 'deciduous')
+plots_lon_non_rtk_coniferous <- plot_metrics_lon_non_rtk %>%
+  dplyr::filter(dominant_leaf_type == 'coniferous')
+
+# filter plots by dominant leaf type (leaf-off non-RTK)
+plots_loff_non_rtk_deciduous <- plot_metrics_loff_non_rtk %>%
+  dplyr::filter(dominant_leaf_type == 'deciduous')
+plots_loff_non_rtk_coniferous <- plot_metrics_loff_non_rtk %>%
+  dplyr::filter(dominant_leaf_type == 'coniferous')
+
+# df versions (leaf-on RTK)
+plots_lon_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon_rtk))
+plots_lon_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_rtk_deciduous))
+plots_lon_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_rtk_coniferous))
+
+# df versions (leaf-off RTK)
+plots_loff_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff_rtk))
+plots_loff_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_rtk_deciduous))
+plots_loff_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_rtk_coniferous))
+
+# df versions (leaf-on non-RTK)
+plots_lon_non_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon_non_rtk))
+plots_lon_non_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_non_rtk_deciduous))
+plots_lon_non_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_non_rtk_coniferous))
+
+# df versions (leaf-off non-RTK)
+plots_loff_non_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff_non_rtk))
+plots_loff_non_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_non_rtk_deciduous))
+plots_loff_non_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_non_rtk_coniferous))
 
 
 
-# 03 - model preparation
+# 03: CV testing
 #-------------------------------------------------------------------------------
 
-################################################################################
-#                           START DRAFT - cv testing                           #
+# define data combinations for CV comparison
+# (RTK vs non-RTK) x (deciduous vs coniferous vs all)
+# leaf-on vs leaf-off not differentiated as plot positions are the same
 
-# leave-one-out cv (loocv)
-loo_cv <- caret::createFolds(
-  1:nrow(plots_lon_coniferous), k = nrow(plots_lon_coniferous), returnTrain = F
+data_list <- list(
+  rtk_all = list(data = plot_metrics_lon_rtk, predpoints = pixel_centroids),
+  rtk_deciduous = list(data = plots_lon_rtk_deciduous, predpoints = pixel_centroids_deciduous),
+  rtk_coniferous = list(data = plots_lon_rtk_coniferous, predpoints = pixel_centroids_coniferous),
+  non_rtk_all = list(data = plot_metrics_lon_non_rtk, predpoints = pixel_centroids),
+  non_rtk_deciduous = list(data = plots_lon_non_rtk_deciduous, predpoints = pixel_centroids_deciduous),
+  non_rtk_coniferous = list(data = plots_lon_non_rtk_coniferous, predpoints = pixel_centroids_coniferous)
 )
 
-predcond_loo_cv <- CAST::geodist(
-  x = plots_lon_coniferous,
-  modeldomain = sf::st_zm(ext_loff),
-  cvfolds = loo_cv
-)
-
-# random 5-fold cross-validation (cv)
-fold5 <- caret::createFolds(1:nrow(plots_lon_coniferous), k = 5, returnTrain = F)
-
-predcond_cv_fold5 <- CAST::geodist(
-  x = plots_lon_coniferous,
-  modeldomain = sf::st_zm(ext_loff),
-  cvfolds = fold5
+# function to compute CV methods for the different datasets
+compute_cv_geodist <- function(data, predpoints, modeldomain) {
+  n <- nrow(data)
+  
+  # LOO CV
+  loo_cv <- caret::createFolds(1:n, k = n, returnTrain = F)
+  geodist_loo <- CAST::geodist(
+    x = data,
+    modeldomain = sf::st_zm(modeldomain),
+    cvfolds = loo_cv
   )
+  
+  # 5-fold CV
+  fold5 <- caret::createFolds(1:n, k = 5, returnTrain = F)
+  geodist_fold5 <- CAST::geodist(
+    x = data,
+    modeldomain = sf::st_zm(modeldomain),
+    cvfolds = fold5
+  )
+  
+  # NNDM LOO CV
+  nndm_result <- CAST::nndm(
+    tpoints = data,
+    predpoints = predpoints
+  )
+  
+  list(
+    loo_cv = loo_cv,
+    geodist_loo = geodist_loo,
+    fold5 = fold5,
+    geodist_fold5 = geodist_fold5,
+    nndm = nndm_result
+  )
+}
 
-# nearest neighbour distance matching (nndm) 
-# leave-one-out (loo) cv
-nndm <- CAST::nndm(
-  tpoints = plots_lon_coniferous,
-  #modeldomain = sf::st_transform(
-  #  sf::st_zm(ext_loff),
-  #  sf::st_crs(plots_lon_coniferous)),
-  predpoints = pixel_centroids,
-  #samplesize = 250
-)
+# compute CV for all datasets
+cv_results <- lapply(data_list, function(item) {
+  compute_cv_geodist(item$data, item$predpoints, ext_loff)
+})
 
-# k-nearest neighbour distance matching (knndm)
-knndm <- CAST::knndm(
-  tpoints = plots_lon_coniferous,
-  predpoints = pixel_centroids,
-  k = 5,
-  clustering = 'kmeans',
-)
+# plot ECDF functions for all combinations
+# LOO CV ECDF plot
+loo_plots <- lapply(names(cv_results), function(name) {
+  plot(cv_results[[name]]$geodist_loo, stat = 'ecdf') +
+    ggplot2::ggtitle(paste0('LOO CV - ', name)) +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 10))
+})
+names(loo_plots) <- names(cv_results)
 
-# plot ECDF function
-plot(predcond_loo_cv, stat = 'ecdf')
-plot(predcond_cv_fold5, stat = 'ecdf')
-plot(nndm, type = 'simple')
-plot(knndm, type = 'simple')
+# 5-fold CV ECDF plot
+fold5_plots <- lapply(names(cv_results), function(name) {
+  plot(cv_results[[name]]$geodist_fold5, stat = 'ecdf') +
+    ggplot2::ggtitle(paste0('5-fold CV - ', name)) +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 10))
+})
+names(fold5_plots) <- names(cv_results)
 
-# plot showing how nndm works
+# NNDM ECDF plot
+nndm_plots <- lapply(names(cv_results), function(name) {
+  plot(cv_results[[name]]$nndm, type = 'simple') +
+    ggplot2::ggtitle(paste0('NNDM - ', name)) +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 10))
+})
+names(nndm_plots) <- names(cv_results)
+
+# combine ECDF plots
+gridExtra::grid.arrange(grobs = loo_plots, ncol = 3, 
+                        top = 'LOO CV - ECDF Comparison')
+
+gridExtra::grid.arrange(grobs = fold5_plots, ncol = 3, 
+                        top = '5-fold CV - ECDF Comparison')
+
+gridExtra::grid.arrange(grobs = nndm_plots, ncol = 3, 
+                        top = 'NNDM - ECDF Comparison')
+
+# plot showing how NNDM works - RTK coniferous example
 # cv iteration with the most excluded plots
-id_plot <- which.max(sapply(nndm$indx_exclude, length))
-lon_coniferous_plot <- plots_lon_coniferous
-lon_coniferous_plot$set <- ""
-lon_coniferous_plot$set[nndm$indx_train[[id_plot]]] <- 'train'
-lon_coniferous_plot$set[nndm$indx_exclude[[id_plot]]] <- 'exclude'
-lon_coniferous_plot$set[nndm$indx_test[[id_plot]]] <- 'test'
-lon_coniferous_plot <- lon_coniferous_plot[order(lon_coniferous_plot$set),]
+nndm_rtk_coniferous <- cv_results$rtk_coniferous$nndm
+id_plot_coniferous <- which.max(sapply(nndm_rtk_coniferous$indx_exclude, length))
+
+rtk_coniferous_plot <- plots_lon_rtk_coniferous
+rtk_coniferous_plot$set <- ""
+rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_train[[id_plot_coniferous]]] <- 'train'
+rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_exclude[[id_plot_coniferous]]] <- 'exclude'
+rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_test[[id_plot_coniferous]]] <- 'test'
+rtk_coniferous_plot <- rtk_coniferous_plot[order(rtk_coniferous_plot$set),]
 
 ggplot() +
   geom_sf(data = ext_loff, fill = 'grey', alpha = 0.1) +
-  geom_sf(data = lon_coniferous_plot, aes(col = set)) +
+  geom_sf(data = rtk_coniferous_plot, aes(col = set)) +
   scale_color_brewer(palette = 'Dark2') +
-  theme_bw()
+  theme_bw() +
+  ggtitle('NNDM visualization - RTK coniferous',
+          subtitle = 'CV iteration with most excluded plots')
 
-# plot showing how knndm works
+# plot showing how NNDM works - RTK deciduous example
+# cv iteration with the most excluded plots
+nndm_rtk_deciduous <- cv_results$rtk_deciduous$nndm
+id_plot_deciduous <- which.max(sapply(nndm_rtk_deciduous$indx_exclude, length))
+
+rtk_deciduous_plot <- plots_lon_rtk_deciduous
+rtk_deciduous_plot$set <- ""
+rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_train[[id_plot_deciduous]]] <- 'train'
+rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_exclude[[id_plot_deciduous]]] <- 'exclude'
+rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_test[[id_plot_deciduous]]] <- 'test'
+rtk_deciduous_plot <- rtk_deciduous_plot[order(rtk_deciduous_plot$set),]
+
 ggplot() +
-  geom_sf(data = ext_loff, fill = "grey", alpha = 0.1) +
-  geom_sf(data = plots_lon_coniferous, aes(col = as.factor(knndm$clusters))) +
+  geom_sf(data = ext_loff, fill = 'grey', alpha = 0.1) +
+  geom_sf(data = rtk_deciduous_plot, aes(col = set)) +
   scale_color_brewer(palette = 'Dark2') +
-  theme_bw() + theme(legend.position = 'none')
+  theme_bw() +
+  ggtitle('NNDM visualization - RTK deciduous',
+          subtitle = 'CV iteration with most excluded plots')
 
-# highlight the clusters in knndm
-ggplot() +
-  geom_sf(data = ext_loff, fill = "grey", alpha = 0.1) +
-  geom_sf(data = plots_lon_coniferous, 
-          aes(col = as.factor(knndm$clusters)), alpha = 0.3) +
-  geom_sf(data = plots_lon_coniferous[knndm$clusters == 5, ], 
-          col = "black", size = 2) +
-  theme_bw() + theme(legend.position = 'none')
-
-# fit models and estimate their performance
-# loo cv
-vol_ha_lon_loo_ctrl <- caret::trainControl(method = 'LOOCV', savePredictions = T)
-vol_ha_lon_loo_mod <- caret::train(
-  plots_lon_coniferous_df[,12:length(plots_lon_coniferous_df)],
-  plots_lon_coniferous_df[,'total_vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_loo_ctrl,
-  ntree = 100,
-  tuneLength = 1
+# fit models and estimate their performance (RTK and leaf-on only)
+data_df_list <- list(
+  rtk_all = plots_lon_rtk_all_df,
+  rtk_deciduous = plots_lon_rtk_deciduous_df,
+  rtk_coniferous = plots_lon_rtk_coniferous_df
 )
-CAST::global_validation(vol_ha_lon_loo_mod)
 
-# 5-fold cv
-vol_ha_lon_fold5_ctrl <- caret::trainControl(
-  method = 'cv', number = 5, savePredictions = T
+# function to fit RF models with different CV methods
+fit_cv_models <- function(data_df, nndm_result, predictor_start_col = 13) {
+  
+  # LOO CV
+  loo_ctrl <- caret::trainControl(method = 'LOOCV', savePredictions = T)
+  loo_mod <- caret::train(
+    data_df[, predictor_start_col:ncol(data_df)],
+    data_df[, 'total_vol_ha'],
+    method = 'rf',
+    importance = F,
+    trControl = loo_ctrl,
+    ntree = 100,
+    tuneLength = 1
   )
-vol_ha_lon_fold5_mod <- caret::train(
-  plots_lon_coniferous_df[,12:length(plots_lon_coniferous_df)],
-  plots_lon_coniferous_df[,'total_vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_fold5_ctrl,
-  ntree = 100,
-  tuneLength = 1
-)
-CAST::global_validation(vol_ha_lon_fold5_mod)
-
-# nndm loo cv
-vol_ha_lon_nndm_ctrl <- caret::trainControl(
-  method = 'cv',
-  index = nndm$indx_train,
-  indexOut = nndm$indx_test,
-  savePredictions = T
-)
-vol_ha_lon_nndm_mod <- caret::train(
-  plots_lon_coniferous_df[,12:length(plots_lon_coniferous_df)],
-  plots_lon_coniferous_df[,'total_vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_nndm_ctrl,
-  ntree = 100,
-  tuneLength = 1
-)
-CAST::global_validation(vol_ha_lon_nndm_mod)
-
-# knndm cv
-vol_ha_lon_knndm_ctrl <- caret::trainControl(
-  method = 'cv',
-  index = knndm$indx_train,
-  indexOut = knndm$indx_test,
-  savePredictions = T
-)
-vol_ha_lon_knndm_mod <- caret::train(
-  plots_lon_coniferous_df[,12:length(plots_lon_coniferous_df)],
-  plots_lon_coniferous_df[,'total_vol_ha'],
-  method = 'rf',
-  importance = F,
-  trControl = vol_ha_lon_knndm_ctrl,
-  ntree = 100,
-  tuneLength = 1
-)
-CAST::global_validation(vol_ha_lon_knndm_mod)
-
-# table with results
-rbind(
-  data.frame(outcome="GSV", validation="LOO CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_loo_mod)))),
-  data.frame(outcome="GSV", validation="5-fold CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_fold5_mod)))),
-  data.frame(outcome="GSV", validation="NNDM LOO CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_nndm_mod)))),
-  data.frame(outcome="GSV", validation="kNNDM LOO CV",
-             t(as.data.frame(CAST::global_validation(vol_ha_lon_knndm_mod))))
-) |> 
-  knitr::kable(digits=2, row.names = F)
-
-
-
-#                           END DRAFT - cv testing                             #
-################################################################################
-################################################################################
-################################################################################
-#                         START DRAFT - model training                         #
-
-# define predictors (ALS metrics)
-predictors_lon_deciduous <- sf::st_drop_geometry(
-  plots_lon_deciduous[,12:length(plots_lon_deciduous)]
+  
+  # 5-fold CV
+  fold5_ctrl <- caret::trainControl(method = 'cv', number = 5, savePredictions = T)
+  fold5_mod <- caret::train(
+    data_df[, predictor_start_col:ncol(data_df)],
+    data_df[, 'total_vol_ha'],
+    method = 'rf',
+    importance = F,
+    trControl = fold5_ctrl,
+    ntree = 100,
+    tuneLength = 1
   )
-predictors_loff_deciduous <- sf::st_drop_geometry(
-  plots_loff_deciduous[,12:length(plots_loff_deciduous)]
+  
+  # NNDM LOO CV
+  nndm_ctrl <- caret::trainControl(
+    method = 'cv',
+    index = nndm_result$indx_train,
+    indexOut = nndm_result$indx_test,
+    savePredictions = T
   )
-predictors_lon_coniferous <- sf::st_drop_geometry(
-  plots_lon_coniferous[,12:length(plots_lon_coniferous)]
-)
-predictors_loff_coniferous <- sf::st_drop_geometry(
-  plots_loff_coniferous[,12:length(plots_loff_coniferous)]
+  nndm_mod <- caret::train(
+    data_df[, predictor_start_col:ncol(data_df)],
+    data_df[, 'total_vol_ha'],
+    method = 'rf',
+    importance = F,
+    trControl = nndm_ctrl,
+    ntree = 100,
+    tuneLength = 1
+  )
+  
+  list(
+    loo = loo_mod,
+    fold5 = fold5_mod,
+    nndm = nndm_mod
+  )
+}
+
+# fit models for all datasets
+cv_models <- lapply(names(data_df_list), function(name) {
+  message(paste0('Fitting models for: ', name))
+  fit_cv_models(
+    data_df = data_df_list[[name]],
+    nndm_result = cv_results[[name]]$nndm
+  )
+})
+names(cv_models) <- names(data_df_list)
+
+# create results table for all datasets
+cv_validation_results <- do.call(rbind, lapply(names(cv_models), function(name) {
+  rbind(
+    data.frame(
+      data = name,
+      validation = 'LOO CV',
+      t(as.data.frame(CAST::global_validation(cv_models[[name]]$loo)))
+    ),
+    data.frame(
+      data = name,
+      validation = '5-fold CV',
+      t(as.data.frame(CAST::global_validation(cv_models[[name]]$fold5)))
+    ),
+    data.frame(
+      data = name,
+      validation = 'NNDM LOO CV',
+      t(as.data.frame(CAST::global_validation(cv_models[[name]]$nndm)))
+    )
+  )
+}))
+
+cv_validation_results |> 
+  knitr::kable(digits = 2, row.names = F)
+
+
+
+# 04: model training
+#-------------------------------------------------------------------------------
+
+# define all training datasets
+# structure: list with data (sf), predictors (df), and matching pixel_centroids
+predictor_start_col <- 13
+
+training_data <- list(
+  # RTK datasets
+  lon_rtk_all = list(
+    data = plot_metrics_lon_rtk,
+    predictors = sf::st_drop_geometry(
+      plot_metrics_lon_rtk[, predictor_start_col:ncol(plot_metrics_lon_rtk)]
+      ),
+    predpoints = pixel_centroids
+  ),
+  lon_rtk_deciduous = list(
+    data = plots_lon_rtk_deciduous,
+    predictors = sf::st_drop_geometry(
+      plots_lon_rtk_deciduous[, predictor_start_col:ncol(plots_lon_rtk_deciduous)]
+      ),
+    predpoints = pixel_centroids_deciduous
+  ),
+  lon_rtk_coniferous = list(
+    data = plots_lon_rtk_coniferous,
+    predictors = sf::st_drop_geometry(
+      plots_lon_rtk_coniferous[, predictor_start_col:ncol(plots_lon_rtk_coniferous)]
+      ),
+    predpoints = pixel_centroids_coniferous
+  ),
+  loff_rtk_all = list(
+    data = plot_metrics_loff_rtk,
+    predictors = sf::st_drop_geometry(
+      plot_metrics_loff_rtk[, predictor_start_col:ncol(plot_metrics_loff_rtk)]
+      ),
+    predpoints = pixel_centroids
+  ),
+  loff_rtk_deciduous = list(
+    data = plots_loff_rtk_deciduous,
+    predictors = sf::st_drop_geometry(
+      plots_loff_rtk_deciduous[, predictor_start_col:ncol(plots_loff_rtk_deciduous)]
+      ),
+    predpoints = pixel_centroids_deciduous
+  ),
+  loff_rtk_coniferous = list(
+    data = plots_loff_rtk_coniferous,
+    predictors = sf::st_drop_geometry(
+      plots_loff_rtk_coniferous[, predictor_start_col:ncol(plots_loff_rtk_coniferous)]
+      ),
+    predpoints = pixel_centroids_coniferous
+  ),
+  # non-RTK datasets
+  lon_non_rtk_all = list(
+    data = plot_metrics_lon_non_rtk,
+    predictors = sf::st_drop_geometry(
+      plot_metrics_lon_non_rtk[, predictor_start_col:ncol(plot_metrics_lon_non_rtk)]
+      ),
+    predpoints = pixel_centroids
+  ),
+  lon_non_rtk_deciduous = list(
+    data = plots_lon_non_rtk_deciduous,
+    predictors = sf::st_drop_geometry(
+      plots_lon_non_rtk_deciduous[, predictor_start_col:ncol(plots_lon_non_rtk_deciduous)]
+      ),
+    predpoints = pixel_centroids_deciduous
+  ),
+  lon_non_rtk_coniferous = list(
+    data = plots_lon_non_rtk_coniferous,
+    predictors = sf::st_drop_geometry(
+      plots_lon_non_rtk_coniferous[, predictor_start_col:ncol(plots_lon_non_rtk_coniferous)]
+      ),
+    predpoints = pixel_centroids_coniferous
+  ),
+  loff_non_rtk_all = list(
+    data = plot_metrics_loff_non_rtk,
+    predictors = sf::st_drop_geometry(
+      plot_metrics_loff_non_rtk[, predictor_start_col:ncol(plot_metrics_loff_non_rtk)]
+      ),
+    predpoints = pixel_centroids
+  ),
+  loff_non_rtk_deciduous = list(
+    data = plots_loff_non_rtk_deciduous,
+    predictors = sf::st_drop_geometry(
+      plots_loff_non_rtk_deciduous[, predictor_start_col:ncol(plots_loff_non_rtk_deciduous)]
+      ),
+    predpoints = pixel_centroids_deciduous
+  ),
+  loff_non_rtk_coniferous = list(
+    data = plots_loff_non_rtk_coniferous,
+    predictors = sf::st_drop_geometry(
+      plots_loff_non_rtk_coniferous[, predictor_start_col:ncol(plots_loff_non_rtk_coniferous)]
+      ),
+    predpoints = pixel_centroids_coniferous
+  )
 )
 
-# initialize nearest neighbour distance matching
-# leave-one-out cross-validation (NNDM LOO CV)
-nndm_deciduous <- CAST::nndm(
-  tpoints = plots_lon_deciduous,
-  predpoints = pixel_centroids_deciduous
-)
-nndm_coniferous <- CAST::nndm(
-  tpoints = plots_lon_coniferous,
-  predpoints = pixel_centroids_coniferous
-)
+# initialize NNDM for all datasets
+message('Initializing NNDM for all datasets...')
+nndm_results <- lapply(names(training_data), function(name) {
+  message(paste0('  Computing NNDM for: ', name))
+  CAST::nndm(
+    tpoints = training_data[[name]]$data,
+    predpoints = training_data[[name]]$predpoints
+  )
+})
+names(nndm_results) <- names(training_data)
 
-# control parameters for the train function
-ctrl_deciduous <- caret::trainControl(
-  method = 'cv',
-  index = nndm_deciduous$indx_train,
-  indexOut = nndm_deciduous$indx_test,
-  savePredictions = T,
-  allowParallel = T
-)
-ctrl_coniferous <- caret::trainControl(
-  method = 'cv',
-  index = nndm_coniferous$indx_train,
-  indexOut = nndm_coniferous$indx_test,
-  savePredictions = T,
-  allowParallel = T
-)
+# create trainControl for each dataset
+train_controls <- lapply(names(nndm_results), function(name) {
+  caret::trainControl(
+    method = 'cv',
+    index = nndm_results[[name]]$indx_train,
+    indexOut = nndm_results[[name]]$indx_test,
+    savePredictions = T,
+    allowParallel = T
+  )
+})
+names(train_controls) <- names(training_data)
 
 # create grid for tuning features
 tgrid <- expand.grid(
@@ -308,25 +477,24 @@ tgrid <- expand.grid(
   min.node.size = c(5, 10, 15, 20)
 )
 
-# correlation plots for lon and loff predictors
-cor_lon_deciduous <- stats::cor(predictors_lon_deciduous, method = 'pearson')
-cor_loff_deciduous <- stats::cor(predictors_loff_deciduous, method = 'pearson')
-cor_lon_coniferous <- stats::cor(predictors_lon_coniferous, method = 'pearson')
-cor_loff_coniferous <- stats::cor(predictors_loff_coniferous, method = 'pearson')
-corrplot::corrplot(cor_lon_deciduous, method = 'color', type = 'full',
-                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA)
-corrplot::corrplot(cor_loff_deciduous, method = 'color', type = 'full',
-                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA)
-corrplot::corrplot(cor_lon_coniferous, method = 'color', type = 'full',
-                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA)
-corrplot::corrplot(cor_loff_coniferous, method = 'color', type = 'full',
-                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA)
+# correlation plots for selected datasets (RTK leaf-on as example)
+cor_lon_rtk_deciduous <- stats::cor(training_data$lon_rtk_deciduous$predictors, method = 'pearson')
+cor_lon_rtk_coniferous <- stats::cor(training_data$lon_rtk_coniferous$predictors, method = 'pearson')
+corrplot::corrplot(cor_lon_rtk_deciduous, method = 'color', type = 'full',
+                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA,
+                   title = 'Correlation - leaf-on RTK deciduous')
+corrplot::corrplot(cor_lon_rtk_coniferous, method = 'color', type = 'full',
+                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA,
+                   title = 'Correlation - leaf-on RTK coniferous')
 
 # train random forest models
 # implementing forward feature selection
-# for all forest inventory attributes, leaf types, and leaf conditions
+# for all forest inventory attributes across all datasets
+# datasets: 2 leaf conditions (lon, loff) x 2 RTK types (rtk, non_rtk) x 
+#           3 leaf types (all, deciduous, coniferous) = 12 datasets
+# total models: 6 responses x 12 datasets = 72 models
 
-# define response variables with their names (for file naming)
+# define response variables
 response_vars <- list(
   list(name = 'total_vol_ha', col = 'total_vol_ha'),
   list(name = 'merch_vol_ha', col = 'merch_vol_ha'),
@@ -336,9 +504,8 @@ response_vars <- list(
   list(name = 'dg', col = 'dg')
 )
 
-# define leaf types and conditions
-leaf_types <- c('deciduous', 'coniferous')
-leaf_conditions <- c('lon', 'loff')
+# dataset names for iteration
+dataset_names <- names(training_data)
 
 # create list to store all models
 ffs_models <- list()
@@ -346,36 +513,34 @@ ffs_models <- list()
 # check which models already exist
 models_to_train <- list()
 for (resp in response_vars) {
-  for (leaf_type in leaf_types) {
-    for (leaf_cond in leaf_conditions) {
-      
-      model_name <- paste0('ffs_rf_', resp$name, '_', leaf_cond, '_', leaf_type)
-      file_name <- paste0('ffs_rf_', resp$name, '_leaf', 
-                          ifelse(leaf_cond == 'lon', 'on', 'off'), 
-                          '_', leaf_type, '.RDS')
-      file_path <- file.path(processed_data_dir, 'models', file_name)
-      
-      if (file.exists(file_path)) {
-        # load existing model
-        message(paste0('Loading existing model: ', file_name))
-        ffs_models[[model_name]] <- readRDS(file_path)
-      } else {
-        # mark for training
-        models_to_train[[model_name]] <- list(
-          resp = resp,
-          leaf_type = leaf_type,
-          leaf_cond = leaf_cond,
-          file_name = file_name
-        )
-      }
+  for (dataset_name in dataset_names) {
+    
+    model_name <- paste0('ffs_rf_', resp$name, '_', dataset_name)
+    file_name <- paste0('ffs_rf_', resp$name, '_', dataset_name, '.RDS')
+    file_path <- file.path(processed_data_dir, 'models', file_name)
+    
+    if (file.exists(file_path)) {
+      # load existing model
+      message(paste0('Loading existing model: ', file_name))
+      ffs_models[[model_name]] <- readRDS(file_path)
+    } else {
+      # mark for training
+      models_to_train[[model_name]] <- list(
+        resp = resp,
+        dataset_name = dataset_name,
+        file_name = file_name
+      )
     }
   }
 }
 
+# print summary
+message(paste0('\n--- Total models: ', length(response_vars) * length(dataset_names), ' ---'))
+message(paste0('--- Models already trained: ', length(ffs_models), ' ---'))
+message(paste0('--- Models to train: ', length(models_to_train), ' ---\n'))
+
 # train only models that don't exist yet
 if (length(models_to_train) > 0) {
-  
-  message(paste0('\n--- ', length(models_to_train), ' models to train ---\n'))
   
   # setup parallel processing
   n_cores <- parallel::detectCores() - 2 
@@ -386,30 +551,15 @@ if (length(models_to_train) > 0) {
     
     model_info <- models_to_train[[model_name]]
     resp <- model_info$resp
-    leaf_type <- model_info$leaf_type
-    leaf_cond <- model_info$leaf_cond
+    dataset_name <- model_info$dataset_name
     file_name <- model_info$file_name
     
     message(paste0('\n--- Training model: ', model_name, ' ---\n'))
     
-    # select predictors based on leaf type and condition
-    if (leaf_type == 'deciduous' && leaf_cond == 'lon') {
-      predictors <- predictors_lon_deciduous
-      ctrl <- ctrl_deciduous
-      response_data <- plots_lon_deciduous
-    } else if (leaf_type == 'deciduous' && leaf_cond == 'loff') {
-      predictors <- predictors_loff_deciduous
-      ctrl <- ctrl_deciduous
-      response_data <- plots_loff_deciduous
-    } else if (leaf_type == 'coniferous' && leaf_cond == 'lon') {
-      predictors <- predictors_lon_coniferous
-      ctrl <- ctrl_coniferous
-      response_data <- plots_lon_coniferous
-    } else {
-      predictors <- predictors_loff_coniferous
-      ctrl <- ctrl_coniferous
-      response_data <- plots_loff_coniferous
-    }
+    # get data for this dataset
+    predictors <- training_data[[dataset_name]]$predictors
+    response_data <- training_data[[dataset_name]]$data
+    ctrl <- train_controls[[dataset_name]]
     
     # get response variable
     response <- sf::st_drop_geometry(response_data[[resp$col]])
@@ -461,108 +611,82 @@ for (model_name in names(ffs_models)) {
 # create list to store all CV predictions
 cv_predictions <- list()
 
-# loop over all combinations 
-# (forest inventory attribute, leaf-type, leaf-condition)
+# loop over all combinations (response variable x dataset)
 for (resp in response_vars) {
-  for (leaf_type in leaf_types) {
-    for (leaf_cond in leaf_conditions) {
-      
-      # create model name
-      model_name <- paste0('ffs_rf_', resp$name, '_', leaf_cond, '_', leaf_type)
-      
-      # check if model exists
-      if (!model_name %in% names(ffs_models)) {
-        message(paste0('Model not found: ', model_name, ' - skipping'))
-        next
-      }
-      
-      # get model and extract CV predictions
-      model <- ffs_models[[model_name]]
-      cv_pred <- model$pred
-      
-      # select appropriate plot data for linking geometries
-      if (leaf_type == 'deciduous' && leaf_cond == 'lon') {
-        plot_data <- plots_lon_deciduous
-      } else if (leaf_type == 'deciduous' && leaf_cond == 'loff') {
-        plot_data <- plots_loff_deciduous
-      } else if (leaf_type == 'coniferous' && leaf_cond == 'lon') {
-        plot_data <- plots_lon_coniferous
-      } else {
-        plot_data <- plots_loff_coniferous
-      }
-      
-      # link to the original geometries (BI plots used for training)
-      cv_pred_sf <- plot_data[cv_pred$rowIndex, ] %>%
-        dplyr::select(key, kspnr, abt) %>%
-        dplyr::mutate(
-          pred = cv_pred$pred,
-          obs = cv_pred$obs
-        )
-      
-      # store spatial predictions
-      pred_name <- paste0('pred_', resp$name, '_', leaf_cond, '_', leaf_type)
-      cv_predictions[[pred_name]] <- cv_pred_sf
-      
-      # save to file
-      file_name <- paste0('pred_obsv_', resp$name, '_leaf',
-                          ifelse(leaf_cond == 'lon', 'on', 'off'),
-                          '_', leaf_type, '.gpkg')
-      sf::st_write(
-        cv_pred_sf,
-        file.path(processed_data_dir, 'predictions', file_name),
-        delete_dsn = T
-      )
-      
-      message(paste0('CV predictions saved: ', file_name))
+  for (dataset_name in dataset_names) {
+    
+    # create model name
+    model_name <- paste0('ffs_rf_', resp$name, '_', dataset_name)
+    
+    # check if model exists
+    if (!model_name %in% names(ffs_models)) {
+      message(paste0('Model not found: ', model_name, ' - skipping'))
+      next
     }
+    
+    # get model and extract CV predictions
+    model <- ffs_models[[model_name]]
+    cv_pred <- model$pred
+    
+    # get plot data for linking geometries
+    plot_data <- training_data[[dataset_name]]$data
+    
+    # link to the original geometries (BI plots used for training)
+    cv_pred_sf <- plot_data[cv_pred$rowIndex, ] %>%
+      dplyr::select(key, kspnr, abt) %>%
+      dplyr::mutate(
+        pred = cv_pred$pred,
+        obs = cv_pred$obs
+      )
+    
+    # store spatial predictions
+    pred_name <- paste0('pred_', resp$name, '_', dataset_name)
+    cv_predictions[[pred_name]] <- cv_pred_sf
+    
+    # save to file
+    file_name <- paste0('pred_obsv_', resp$name, '_', dataset_name, '.gpkg')
+    sf::st_write(
+      cv_pred_sf,
+      file.path(processed_data_dir, 'predictions', file_name),
+      delete_dsn = T
+    )
+    
+    message(paste0('CV predictions saved: ', file_name))
   }
 }
 
-# test where differences between pred and obsv are highest using rel. RMSE
+# compare RTK vs non-RTK model performance
+# for corresponding combinations (same leaf condition and leaf type)
 
 # get model names
 model_names <- names(cv_predictions)
 
-# loop through all 24 models
-results_list <- lapply(1:length(cv_predictions), function(i) {
+# calculate validation metrics for all models
+results_list <- lapply(seq_along(cv_predictions), function(i) {
   
-  # merge current model predictions with bi_plots_rtk
-  merged_data <- cv_predictions[[i]] %>%
-    dplyr::left_join(sf::st_drop_geometry(bi_plots_rtk), by = "kspnr")
+  pred_data <- cv_predictions[[i]]
   
   # calculate squared error and absolute error
-  merged_data$squared_error <- (merged_data$pred - merged_data$obs)^2
-  merged_data$abs_error <- abs(merged_data$pred - merged_data$obs)
+  pred_data$squared_error <- (pred_data$pred - pred_data$obs)^2
+  pred_data$abs_error <- abs(pred_data$pred - pred_data$obs)
   
-  # summarize by estimated status
-  summary_by_estimated <- merged_data %>%
-    dplyr::group_by(estimated) %>%
+  # calculate summary statistics
+  summary_stats <- pred_data %>%
+    sf::st_drop_geometry() %>%
     dplyr::summarise(
       n = dplyr::n(),
-      RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
-      mean_obs = mean(obs, na.rm = TRUE),
-      rel_RMSE = sqrt(mean(squared_error, na.rm = TRUE)) / mean(obs, na.rm = TRUE) * 100,
-      MAE = mean(abs_error, na.rm = TRUE),
-      max_error = max(abs_error, na.rm = TRUE),
-      .groups = 'drop'
+      RMSE = sqrt(mean(squared_error, na.rm = T)),
+      mean_obs = mean(obs, na.rm = T),
+      rel_RMSE = sqrt(mean(squared_error, na.rm = T)) / mean(obs, na.rm = T) * 100,
+      MAE = mean(abs_error, na.rm = T),
+      max_error = max(abs_error, na.rm = T),
+      bias = mean(pred - obs, na.rm = T),
+      rel_bias = mean(pred - obs, na.rm = T) / mean(obs, na.rm = T) * 100
+    ) %>%
+    dplyr::mutate(
+      model_id = i,
+      model_name = model_names[i]
     )
-  
-  # summarize for all plots combined
-  summary_all <- merged_data %>%
-    dplyr::summarise(
-      estimated = "all",
-      n = dplyr::n(),
-      RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
-      mean_obs = mean(obs, na.rm = TRUE),
-      rel_RMSE = sqrt(mean(squared_error, na.rm = TRUE)) / mean(obs, na.rm = TRUE) * 100,
-      MAE = mean(abs_error, na.rm = TRUE),
-      max_error = max(abs_error, na.rm = TRUE)
-    )
-  
-  # combine both summaries
-  summary_stats <- dplyr::bind_rows(summary_by_estimated, summary_all) %>%
-    dplyr::mutate(model_id = i,
-                  model_name = ifelse(exists("model_names"), model_names[i], paste0("model_", i)))
   
   return(summary_stats)
 })
@@ -570,111 +694,172 @@ results_list <- lapply(1:length(cv_predictions), function(i) {
 # combine all results
 all_results <- dplyr::bind_rows(results_list)
 
-# extract response variable from model_name
+# extract components from model_name
+# format: pred_{response}_{leaf_cond}_{positioning}_{leaf_type}
 all_results <- all_results %>%
+  
   dplyr::mutate(
-    # extract the response variable (everything between "pred_" and "_lon" or "_loff")
-    response_var = gsub("pred_(.*?)_(lon|loff)_.*", "\\1", model_name),
+    
+    # extract response variable (everything between 'pred_' and '_lon_' or '_loff_')
+    response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
+    
+    # extract positioning method (rtk vs non-rtk)
+    positioning = dplyr::case_when(
+      grepl('_non_rtk_', model_name) ~ 'non_rtk',
+      grepl('_rtk_', model_name) ~ 'rtk',
+      T ~ NA_character_
+    ),
+    
     # extract leaf condition (lon/loff)
-    leaf_condition = ifelse(grepl("_lon_", model_name), "lon", "loff"),
-    # extract leaf type (deciduous/coniferous)
-    leaf_type = ifelse(grepl("deciduous", model_name), "deciduous", "coniferous")
+    leaf_condition = dplyr::case_when(
+      grepl('_lon_', model_name) ~ 'lon',
+      grepl('_loff_', model_name) ~ 'loff',
+      T ~ NA_character_
+    ),
+    
+    # extract leaf type (all/deciduous/coniferous)
+    leaf_type = dplyr::case_when(
+      grepl('_deciduous$', model_name) ~ 'deciduous',
+      grepl('_coniferous$', model_name) ~ 'coniferous',
+      grepl('_all$', model_name) ~ 'all',
+      T ~ NA_character_
+    )
   )
 
-# aggregate by response variable and leaf type (averaged over leaf condition)
-summary_by_response_leaf <- all_results %>%
-  dplyr::group_by(response_var, leaf_type, estimated) %>%
-  dplyr::summarise(
-    n_models = dplyr::n(),
-    total_plots = sum(n, na.rm = TRUE),
-    avg_RMSE = mean(RMSE, na.rm = TRUE),
-    avg_rel_RMSE = mean(rel_RMSE, na.rm = TRUE),
-    avg_MAE = mean(MAE, na.rm = TRUE),
-    avg_max_error = mean(max_error, na.rm = TRUE),
-    .groups = 'drop'
-  )
-
-summary_by_response_leaf %>%
+# display full results table
+all_results %>%
+  dplyr::select(
+    response_var, positioning, leaf_condition, leaf_type,
+    n, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
+  dplyr::arrange(response_var, positioning, leaf_condition, leaf_type) %>%
   knitr::kable(digits = 2)
 
-# summary separated by leaf condition (no aggregation)
-summary_by_response_leaf_cond <- all_results %>%
-  dplyr::group_by(response_var, leaf_type, leaf_condition, estimated) %>%
-  dplyr::summarise(
-    n = sum(n, na.rm = TRUE),
-    RMSE = mean(RMSE, na.rm = TRUE),
-    mean_obs = mean(mean_obs, na.rm = TRUE),
-    rel_RMSE = mean(rel_RMSE, na.rm = TRUE),
-    MAE = mean(MAE, na.rm = TRUE),
-    max_error = mean(max_error, na.rm = TRUE),
-    .groups = 'drop'
-  )
-
-summary_by_response_leaf_cond %>%
-  knitr::kable(digits = 2)
-
-# calculate absolute difference between leaf-on and leaf-off rel. RMSE
-diff_lon_loff <- all_results_plot %>%
-  sf::st_drop_geometry() %>%
+# compare RTK vs non-RTK for corresponding combinations
+pos_comparison <- all_results %>%
+  dplyr::select(
+    response_var, positioning, leaf_condition, leaf_type,
+    n, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
   tidyr::pivot_wider(
-    id_cols = c(response_var, leaf_type, plot_type),
-    names_from = leaf_condition,
-    values_from = rel_RMSE
+    id_cols = c(response_var, leaf_condition, leaf_type),
+    names_from = positioning,
+    values_from = c(n, RMSE, rel_RMSE, MAE, bias, rel_bias),
+    names_glue = '{positioning}_{.value}'
   ) %>%
   dplyr::mutate(
-    abs_diff = abs(`leaf-on` - `leaf-off`),
-    better_condition = ifelse(`leaf-on` < `leaf-off`, "leaf-on", "leaf-off")
+    # calculate differences (rtk - non-rtk)
+    diff_RMSE = rtk_RMSE - non_rtk_RMSE,
+    diff_rel_RMSE = rtk_rel_RMSE - non_rtk_rel_RMSE,
+    diff_MAE = rtk_MAE - non_rtk_MAE,
+    diff_bias = rtk_bias - non_rtk_bias,
+    diff_rel_bias = rtk_rel_bias - non_rtk_rel_bias,
+    # determine which is better (lower error = better)
+    better_positioning = ifelse(rtk_rel_RMSE < non_rtk_rel_RMSE, 'rtk', 'non_rtk'),
+    # relative improvement (%)
+    rel_improvement = (non_rtk_rel_RMSE - rtk_rel_RMSE) / non_rtk_rel_RMSE * 100
   )
 
-diff_lon_loff %>%
-  dplyr::select(response_var, leaf_type, plot_type, `leaf-on`, `leaf-off`, abs_diff, better_condition) %>%
+# display RTK vs non-RTK comparison
+pos_comparison %>%
+  dplyr::select(response_var, leaf_condition, leaf_type, 
+                rtk_rel_RMSE, non_rtk_rel_RMSE, diff_rel_RMSE,
+                rtk_rel_bias, non_rtk_rel_bias, diff_rel_bias,
+                better_positioning, rel_improvement) %>%
+  dplyr::arrange(response_var, leaf_condition, leaf_type) %>%
   knitr::kable(digits = 2)
 
-# summary: mean difference by leaf type and plot type across all response variables
-diff_summary_by_leaf_type <- diff_lon_loff %>%
-  dplyr::filter(plot_type %in% c("All plots", "RTK remeasured")) %>%
-  dplyr::group_by(leaf_type, plot_type) %>%
+# summary: how often is RTK better than non-RTK?
+pos_summary <- pos_comparison %>%
+  dplyr::group_by(leaf_condition, leaf_type) %>%
   dplyr::summarise(
-    mean_abs_diff = mean(abs_diff, na.rm = TRUE),
-    sd_abs_diff = sd(abs_diff, na.rm = TRUE),
-    n_leaf_on_better = sum(better_condition == "leaf-on"),
-    n_leaf_off_better = sum(better_condition == "leaf-off"),
+    n_comparisons = dplyr::n(),
+    n_rtk_better = sum(better_positioning == 'rtk'),
+    n_non_rtk_better = sum(better_positioning == 'non_rtk'),
+    pct_rtk_better = n_rtk_better / n_comparisons * 100,
+    mean_rel_improvement = mean(rel_improvement, na.rm = T),
     .groups = 'drop'
   )
 
-diff_summary_by_leaf_type %>%
+pos_summary %>%
   knitr::kable(digits = 2)
+
+# summary by response variable
+pos_summary_by_response <- pos_comparison %>%
+  dplyr::group_by(response_var) %>%
+  dplyr::summarise(
+    n_comparisons = dplyr::n(),
+    n_rtk_better = sum(better_positioning == 'rtk'),
+    n_non_rtk_better = sum(better_positioning == 'non_rtk'),
+    pct_rtk_better = n_rtk_better / n_comparisons * 100,
+    mean_rtk_rel_RMSE = mean(rtk_rel_RMSE, na.rm = T),
+    mean_non_rtk_rel_RMSE = mean(non_rtk_rel_RMSE, na.rm = T),
+    mean_rel_improvement = mean(rel_improvement, na.rm = T),
+    .groups = 'drop'
+  )
+
+pos_summary_by_response %>%
+  knitr::kable(digits = 2)
+
+# overall summary
+overall_summary <- pos_comparison %>%
+  dplyr::summarise(
+    total_comparisons = dplyr::n(),
+    n_rtk_better = sum(better_positioning == 'rtk'),
+    n_non_rtk_better = sum(better_positioning == 'non_rtk'),
+    pct_rtk_better = n_rtk_better / total_comparisons * 100,
+    mean_rtk_rel_RMSE = mean(rtk_rel_RMSE, na.rm = T),
+    mean_non_rtk_rel_RMSE = mean(non_rtk_rel_RMSE, na.rm = T),
+    mean_rel_improvement = mean(rel_improvement, na.rm = T)
+  )
+
+message('\n--- Overall RTK vs non-RTK comparison ---')
+overall_summary %>%
+  knitr::kable(digits = 2)
+
+# define forest inventory attribute names (response variables)
+forest_inv_names <- c(
+  'agb_ha' = 'AGB',
+  'total_vol_ha' = 'VOL_Tot',
+  'merch_vol_ha' = 'VOL_Merch',
+  'basal_area_ha' = 'BA',
+  'dg' = 'QMD',
+  'tree_density' = 'TD'
+)
+
+# define order for forest inventory attributes
+forest_inv_order <- c('AGB', 'VOL_Tot', 'VOL_Merch', 'BA', 'QMD', 'TD')
 
 # prepare data for plotting
-all_results_plot <- all_results %>%
+data_visual <- all_results %>%
   dplyr::mutate(
-    plot_type = dplyr::case_when(
-      estimated == "all" ~ "All plots",
-      estimated == "yes" ~ "RTK estimated",
-      estimated == "no" ~ "RTK remeasured",
-      is.na(estimated) ~ "non-RTK"
-    ),
-    plot_type = factor(plot_type, levels = c("All plots", "RTK remeasured", "non-RTK", "RTK estimated")),
-    leaf_condition = ifelse(leaf_condition == "lon", "leaf-on", "leaf-off")
-  )
-
-# plot 1: relative RMSE by response variable and leaf type (aggregated over leaf condition)
-# with error bars showing range between leaf-on and leaf-off
-all_results_summary <- all_results_plot %>%
-  dplyr::group_by(response_var, leaf_type, plot_type) %>%
+    leaf_condition_label = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
+    response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order),
+    # rename and set order
+    leaf_type = factor(
+      dplyr::case_when(
+        leaf_type == 'all' ~ 'coniferous and deciduous combined (n = 170)',
+        leaf_type == 'deciduous' ~ 'deciduous (n = 139)',
+        leaf_type == 'coniferous' ~ 'coniferous (n = 31)'
+      ),
+      levels = c('coniferous and deciduous combined (n = 170)', 'deciduous (n = 139)', 'coniferous (n = 31)')
+    )
+  ) %>%
+  dplyr::group_by(response_var, response_var_label, positioning, leaf_type) %>%
   dplyr::summarise(
-    mean_rel_RMSE = mean(rel_RMSE, na.rm = TRUE),
-    lon_rel_RMSE = rel_RMSE[leaf_condition == "leaf-on"],
-    loff_rel_RMSE = rel_RMSE[leaf_condition == "leaf-off"],
-    min_rel_RMSE = min(rel_RMSE, na.rm = TRUE),
-    max_rel_RMSE = max(rel_RMSE, na.rm = TRUE),
-    # determine which condition is at min/max
-    min_label = ifelse(lon_rel_RMSE <= loff_rel_RMSE, "leaf-on", "leaf-off"),
-    max_label = ifelse(lon_rel_RMSE >= loff_rel_RMSE, "leaf-on", "leaf-off"),
+    mean_rel_RMSE = mean(rel_RMSE, na.rm = T),
+    lon_rel_RMSE = rel_RMSE[leaf_condition == 'lon'],
+    loff_rel_RMSE = rel_RMSE[leaf_condition == 'loff'],
+    min_rel_RMSE = min(rel_RMSE, na.rm = T),
+    max_rel_RMSE = max(rel_RMSE, na.rm = T),
+    # labels for error bar ends
+    min_label = ifelse(lon_rel_RMSE <= loff_rel_RMSE, 'leaf-on', 'leaf-off'),
+    max_label = ifelse(lon_rel_RMSE >= loff_rel_RMSE, 'leaf-on', 'leaf-off'),
     .groups = 'drop'
   )
 
-ggplot(all_results_summary, aes(x = response_var, y = mean_rel_RMSE, fill = plot_type)) +
+# plot: rel RMSE by response variable, positioning (rtk/non-rtk) as bars
+# error bars show range between leaf-on and leaf-off
+# faceted by leaf type (all, deciduous, coniferous)
+ggplot(data_visual, aes(x = response_var_label, y = mean_rel_RMSE, fill = positioning)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
   geom_errorbar(aes(ymin = min_rel_RMSE, ymax = max_rel_RMSE),
                 position = position_dodge(width = 0.8), width = 0.25) +
@@ -682,186 +867,143 @@ ggplot(all_results_summary, aes(x = response_var, y = mean_rel_RMSE, fill = plot
             position = position_dodge(width = 0.8), vjust = -0.5, size = 2.5) +
   geom_text(aes(y = min_rel_RMSE, label = min_label), 
             position = position_dodge(width = 0.8), vjust = 1.5, size = 2.5) +
-  facet_wrap(~ leaf_type) +
-  labs(title = "Relative RMSE (%) by Forest Invenotry Attribute and Dominant Leaf Type",
-       subtitle = "Error bars show range between leaf-on and leaf-off",
-       x = "", 
-       y = "Relative RMSE (%)",
-       fill = "Plot Type") +
+  facet_wrap(~ leaf_type, ncol = 3) +
+  scale_fill_manual(values = c('rtk' = '#606060', 'non_rtk' = '#B0B0B0'),
+                    labels = c('rtk' = 'RTK', 'non_rtk' = 'non-RTK')) +
+  labs(x = '', 
+       y = 'Relative RMSE (%)',
+       fill = 'Positioning') +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.background = element_rect(fill = 'lightgrey'),
+        strip.text = element_text(face = 'bold'),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank())
 
-# plot 2: relative RMSE separated by leaf condition and leaf type (4 panels)
-ggplot(all_results_plot, aes(x = response_var, y = rel_RMSE, fill = plot_type)) +
+# plot: same but separated by leaf condition 
+# (6 panels: 2 leaf conditions x 3 leaf types)
+ggplot(all_results %>% 
+         dplyr::mutate(leaf_condition_label = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
+                       response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order)), 
+       aes(x = response_var_label, y = rel_RMSE, fill = positioning)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  facet_grid(leaf_condition_label ~ leaf_type) +
+  scale_fill_manual(values = c('rtk' = '#606060', 'non_rtk' = '#B0B0B0'),
+                    labels = c('rtk' = 'RTK', 'non_rtk' = 'non-RTK')) +
+  labs(x = '', 
+       y = 'Relative RMSE (%)',
+       fill = 'Positioning') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.background = element_rect(fill = 'lightgrey'),
+        strip.text = element_text(face = 'bold'))
+
+# plot: difference between RTK and non-RTK (improvement)
+ggplot(pos_comparison %>%
+         dplyr::mutate(
+           leaf_condition = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
+           response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order),
+           leaf_type = factor(
+             dplyr::case_when(
+               leaf_type == 'all' ~ 'coniferous and deciduous combined (n = 170)',
+               leaf_type == 'deciduous' ~ 'deciduous (n = 139)',
+               leaf_type == 'coniferous' ~ 'coniferous (n = 31)'
+             ),
+             levels = c('coniferous and deciduous combined (n = 170)', 'deciduous (n = 139)', 'coniferous (n = 31)')
+           )
+         ),  
+       aes(x = response_var_label, y = rel_improvement, fill = rel_improvement > 0)) +
+  geom_col(width = 0.7) +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey40') +
   facet_grid(leaf_condition ~ leaf_type) +
-  labs(title = "Relative RMSE (%) by Leaf Condition and Dominant Leaf Type",
-       x = "", 
-       y = "Relative RMSE (%)",
-       fill = "Plot Type") +
+  scale_fill_manual(values = c('TRUE' = '#606060', 'FALSE' = '#B0B0B0'),
+                    labels = c('TRUE' = 'RTK better', 'FALSE' = 'non-RTK better'),
+                    name = '') +
+  labs(x = '', 
+       y = 'Relative Improvement (%)') +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-# plot: absolute difference between leaf-on and leaf-off (All plots and RTK remeasured only)
-ggplot(diff_lon_loff %>% dplyr::filter(plot_type %in% c("All plots", "RTK remeasured")), 
-       aes(x = response_var, y = abs_diff, fill = better_condition)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-  facet_grid(plot_type ~ leaf_type) +
-  scale_fill_manual(values = c("leaf-on" = "#2E7D32", "leaf-off" = "#1565C0"),
-                    name = "Better condition") +
-  labs(title = "Absolute Difference in Relative RMSE between Leaf-on and Leaf-off",
-       subtitle = "Bar color indicates which condition has lower (better) rRMSE",
-       x = "", 
-       y = "Absolute Difference in rel. RMSE (%)") +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-# plot: compare leaf-on vs leaf-off differences between deciduous and coniferous
-# for All plots and RTK remeasured
-ggplot(diff_lon_loff %>% dplyr::filter(plot_type %in% c("All plots", "RTK remeasured")), 
-       aes(x = leaf_type, y = abs_diff, fill = leaf_type)) +
-  geom_col(width = 0.6) +
-  geom_text(aes(label = round(abs_diff, 1)), vjust = -0.5, size = 3) +
-  facet_grid(plot_type ~ response_var) +
-  scale_fill_manual(values = c("deciduous" = "#8BC34A", "coniferous" = "#4CAF50")) +
-  labs(title = "Leaf-on vs Leaf-off Difference: Deciduous vs Coniferous",
-       subtitle = "Absolute difference in rel. RMSE (%)",
-       x = "", 
-       y = "Absolute Difference in rel. RMSE (%)") +
-  theme_bw() +
-  theme(legend.position = "none",
-        axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.background = element_rect(fill = 'lightgrey'),
+        strip.text = element_text(face = 'bold'),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank())
 
 ##########################################################
 
-# plot predicted vs. observed GSV with CV predictions
+# plot predicted vs. observed with CV predictions
+# combining RTK and non-RTK in one plot
+# 36 plots: 6 response vars x 2 leaf conditions x 3 leaf types
 
-# deciduous
-ggplot(final_pred_lon_deciduous, aes(x=obs, y=pred)) +
-  geom_point() +
-  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
-  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  coord_fixed(ratio = 1) +
-  scale_x_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
-  scale_y_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
-  geom_abline(slope=1, intercept=0, linewidth=1, color='red') +
-  ggtitle('leaf-on')
+# combine all CV predictions into one data frame
+all_cv_predictions <- do.call(rbind, lapply(names(cv_predictions), function(name) {
+  cv_predictions[[name]] %>%
+    sf::st_drop_geometry() %>%
+    dplyr::mutate(model_name = name)
+}))
 
-ggplot(final_pred_loff_deciduous, aes(x=obs, y=pred)) +
-  geom_point() +
-  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
-  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  coord_fixed(ratio = 1) +
-  scale_x_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
-  scale_y_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
-  geom_abline(slope=1, intercept=0, linewidth=1, color='red') +
-  ggtitle('leaf-off')
-
-final_pred_lon_loff_deciduous <- dplyr::bind_rows(
-  final_pred_lon_deciduous %>% dplyr::mutate(condition = 'leaf-on'),
-  final_pred_loff_deciduous %>% dplyr::mutate(condition = 'leaf-off')
-)
-
-stats_summary_deciduous <- final_pred_lon_loff_deciduous %>%
-  dplyr::group_by(condition) %>%
-  dplyr::summarise(
-    rmse = sqrt(mean((pred - obs)^2, na.rm = T)),
-    rrmse = (sqrt(mean((pred - obs)^2, na.rm = T)) / mean(obs, na.rm = T)),
-    r_squared = stats::cor(obs, pred, use = 'complete.obs')^2,
-    .groups = 'drop'
+# extract components from model_name
+all_cv_predictions <- all_cv_predictions %>%
+  dplyr::mutate(
+    response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
+    positioning = dplyr::case_when(
+      grepl('_non_rtk_', model_name) ~ 'non_rtk',
+      grepl('_rtk_', model_name) ~ 'rtk',
+      T ~ NA_character_
+    ),
+    leaf_condition = dplyr::case_when(
+      grepl('_lon_', model_name) ~ 'leaf-on',
+      grepl('_loff_', model_name) ~ 'leaf-off',
+      T ~ NA_character_
+    ),
+    leaf_type = dplyr::case_when(
+      grepl('_deciduous$', model_name) ~ 'deciduous',
+      grepl('_coniferous$', model_name) ~ 'coniferous',
+      grepl('_all$', model_name) ~ 'all',
+      T ~ NA_character_
+    )
   )
 
-text_labels_deciduous <- paste0(
-  'leaf-on: rRMSE = ', round(stats_summary_deciduous$rrmse[stats_summary_deciduous$condition == 'leaf-on'], 2),
-  ', R² = ', round(stats_summary_deciduous$r_squared[stats_summary_deciduous$condition == 'leaf-on'], 2), '\n',
-  'leaf-off: rRMSE = ', round(stats_summary_deciduous$rrmse[stats_summary_deciduous$condition == 'leaf-off'], 2),
-  ', R² = ', round(stats_summary_deciduous$r_squared[stats_summary_deciduous$condition == 'leaf-off'], 2)
-)
-
-ggplot(final_pred_lon_loff_deciduous, aes(x = obs, y = pred, color = condition)) +
-  geom_point() +
-  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
-  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5),
-        legend.position = "top") +
-  coord_fixed(ratio = 1) +
-  scale_x_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
-  scale_y_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
-  scale_color_manual(values = c('leaf-on' = 'gray60', 'leaf-off' = 'gray30'),
-                     name = 'Condition') +
-  geom_abline(slope = 1, intercept = 0, linewidth = 1, color = 'red') +
-  annotate('text', x = 475, y = 10, label = text_labels_deciduous, 
-           hjust = 0, vjust = 0, size = 3.5, color = 'black')
-
-# coniferous
-ggplot(final_pred_lon_coniferous, aes(x=obs, y=pred)) +
-  geom_point() +
-  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
-  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  coord_fixed(ratio = 1) +
-  scale_x_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
-  scale_y_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
-  geom_abline(slope=1, intercept=0, linewidth=1, color='red') +
-  ggtitle('leaf-on')
-
-ggplot(final_pred_loff_coniferous, aes(x=obs, y=pred)) +
-  geom_point() +
-  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
-  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  coord_fixed(ratio = 1) +
-  scale_x_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
-  scale_y_continuous(limits=c(0,1200), breaks=seq(0,1500, by=300)) +
-  geom_abline(slope=1, intercept=0, linewidth=1, color='red') +
-  ggtitle('leaf-off')
-
-final_pred_lon_loff_coniferous <- dplyr::bind_rows(
-  final_pred_lon_coniferous %>% dplyr::mutate(condition = 'leaf-on'),
-  final_pred_loff_coniferous %>% dplyr::mutate(condition = 'leaf-off')
-)
-
-stats_summary_coniferous <- final_pred_lon_loff_coniferous %>%
-  dplyr::group_by(condition) %>%
-  dplyr::summarise(
-    rmse = sqrt(mean((pred - obs)^2, na.rm = T)),
-    rrmse = (sqrt(mean((pred - obs)^2, na.rm = T)) / mean(obs, na.rm = T)),
-    r_squared = stats::cor(obs, pred, use = 'complete.obs')^2,
-    .groups = 'drop'
-  )
-
-text_labels_coniferous <- paste0(
-  'leaf-on: rRMSE = ', round(stats_summary_coniferous$rrmse[stats_summary_coniferous$condition == 'leaf-on'], 2),
-  ', R² = ', round(stats_summary_coniferous$r_squared[stats_summary_coniferous$condition == 'leaf-on'], 2), '\n',
-  'leaf-off: rRMSE = ', round(stats_summary_coniferous$rrmse[stats_summary_coniferous$condition == 'leaf-off'], 2),
-  ', R² = ', round(stats_summary_coniferous$r_squared[stats_summary_coniferous$condition == 'leaf-off'], 2)
-)
-
-ggplot(final_pred_lon_loff_coniferous, aes(x = obs, y = pred, color = condition)) +
-  geom_point() +
-  xlab(expression(paste('observed GSV [', m^3, ha^-1, ']', sep = ''))) +
-  ylab(expression(paste('predicted GSV [', m^3, ha^-1, ']', sep = ''))) +
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5),
-        legend.position = "top") +
-  coord_fixed(ratio = 1) +
-  scale_x_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
-  scale_y_continuous(limits = c(0, 800), breaks = seq(0, 800, by = 200)) +
-  scale_color_manual(values = c('leaf-on' = 'gray60', 'leaf-off' = 'gray30'),
-                     name = 'Condition') +
-  geom_abline(slope = 1, intercept = 0, linewidth = 1, color = 'red') +
-  annotate('text', x = 475, y = 10, label = text_labels_coniferous, 
-           hjust = 0, vjust = 0, size = 3.5, color = 'black')
-
-#                           END DRAFT - model training                         #
-################################################################################
+# create one plot per response variable
+for (resp in unique(all_cv_predictions$response_var)) {
+  
+  plot_data_resp <- all_cv_predictions %>%
+    dplyr::filter(response_var == resp) %>%
+    dplyr::mutate(
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous'))
+    )
+  
+  if (nrow(plot_data_resp) == 0) next
+  
+  # get forest inventory attribute name for response variable
+  forest_inv_label <- forest_inv_names[resp]
+  
+  # calculate axis limits for equal scales
+  axis_max <- max(c(plot_data_resp$obs, plot_data_resp$pred), na.rm = T)
+  axis_min <- min(c(plot_data_resp$obs, plot_data_resp$pred), na.rm = T)
+  
+  p <- ggplot(plot_data_resp, aes(x = obs, y = pred, color = positioning, shape = positioning)) +
+    geom_point(alpha = 0.7, size = 2) +
+    geom_abline(slope = 1, intercept = 0, linewidth = 1, color = 'red', linetype = 'dashed') +
+    geom_smooth(method = 'lm', se = F, linewidth = 1) +
+    facet_grid(leaf_condition ~ leaf_type) +
+    coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
+    scale_color_manual(values = c('rtk' = '#404040', 'non_rtk' = '#909090'),
+                       labels = c('rtk' = 'RTK', 'non_rtk' = 'non-RTK')) +
+    scale_shape_manual(values = c('rtk' = 16, 'non_rtk' = 17),
+                       labels = c('rtk' = 'RTK', 'non_rtk' = 'non-RTK')) +
+    labs(title = paste0('Predicted vs. Observed: ', forest_inv_label),
+         x = 'Observed', 
+         y = 'Predicted',
+         color = 'Positioning', 
+         shape = 'Positioning') +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+          legend.position = 'bottom',
+          strip.background = element_rect(fill = 'lightgrey'),
+          strip.text = element_text(face = 'bold'))
+  
+  print(p)
+}
 
 
 
