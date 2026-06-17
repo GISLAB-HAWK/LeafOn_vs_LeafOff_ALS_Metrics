@@ -110,6 +110,9 @@ raw_data_dir <- 'data/raw_data/'
 # define processed data directory
 processed_data_dir <- 'data/processed_data/'
 
+# define meta data directory
+meta_data_dir <- 'data/metadata/'
+
 # define output directory
 output_dir <- 'output/'
 
