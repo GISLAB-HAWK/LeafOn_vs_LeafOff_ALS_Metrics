@@ -617,41 +617,51 @@ for (resp in response_vars) {
     
     # create model name
     model_name <- paste0('ffs_rf_', resp$name, '_', dataset_name)
-    
-    # check if model exists
-    if (!model_name %in% names(ffs_models)) {
-      message(paste0('Model not found: ', model_name, ' - skipping'))
-      next
-    }
-    
-    # get model and extract CV predictions
-    model <- ffs_models[[model_name]]
-    cv_pred <- model$pred
-    
-    # get plot data for linking geometries
-    plot_data <- training_data[[dataset_name]]$data
-    
-    # link to the original geometries (BI plots used for training)
-    cv_pred_sf <- plot_data[cv_pred$rowIndex, ] %>%
-      dplyr::select(key, kspnr, abt) %>%
-      dplyr::mutate(
-        pred = cv_pred$pred,
-        obs = cv_pred$obs
-      )
-    
-    # store spatial predictions
     pred_name <- paste0('pred_', resp$name, '_', dataset_name)
-    cv_predictions[[pred_name]] <- cv_pred_sf
-    
-    # save to file
     file_name <- paste0('pred_obsv_', resp$name, '_', dataset_name, '.gpkg')
-    sf::st_write(
-      cv_pred_sf,
-      file.path(processed_data_dir, 'predictions', file_name),
-      delete_dsn = T
-    )
+    file_path <- file.path(processed_data_dir, 'predictions', file_name)
     
-    message(paste0('CV predictions saved: ', file_name))
+    if (file.exists(file_path)) {
+      
+      # load existing CV predictions
+      message(paste0('Loading existing CV predictions: ', file_name))
+      cv_predictions[[pred_name]] <- sf::st_read(file_path, quiet = T)
+      
+    } else {
+      
+      # check if model exists
+      if (!model_name %in% names(ffs_models)) {
+        message(paste0('Model not found: ', model_name, ' - skipping'))
+        next
+      }
+      
+      # get model and extract CV predictions
+      model <- ffs_models[[model_name]]
+      cv_pred <- model$pred
+      
+      # get plot data for linking geometries
+      plot_data <- training_data[[dataset_name]]$data
+      
+      # link to the original geometries (BI plots used for training)
+      cv_pred_sf <- plot_data[cv_pred$rowIndex, ] %>%
+        dplyr::select(key, kspnr, abt) %>%
+        dplyr::mutate(
+          pred = cv_pred$pred,
+          obs = cv_pred$obs
+        )
+      
+      # store spatial predictions
+      cv_predictions[[pred_name]] <- cv_pred_sf
+      
+      # save to file
+      sf::st_write(
+        cv_pred_sf,
+        file_path,
+        delete_dsn = T
+      )
+      
+      message(paste0('CV predictions saved: ', file_name))
+    }
   }
 }
 
@@ -1007,9 +1017,708 @@ for (resp in unique(all_cv_predictions$response_var)) {
 
 
 
+# 05: leaf-on vs leaf-off comparison (RTK deciduous)
+#-------------------------------------------------------------------------------
+
+# focus: compare leaf-on and leaf-off model performance
+# using NNDM LOO CV results for RTK deciduous plots only
+
+# filter CV validation results for RTK deciduous
+lon_vs_loff <- all_results %>%
+  dplyr::filter(positioning == 'rtk', leaf_type == 'deciduous') %>%
+  dplyr::select(
+    response_var, leaf_condition,
+    n, RMSE, rel_RMSE, MAE, bias, rel_bias
+  ) %>%
+  dplyr::arrange(response_var, leaf_condition)
+
+# display comparison table
+lon_vs_loff %>%
+  knitr::kable(digits = 2, caption = 'Leaf-on vs Leaf-off: RTK deciduous (NNDM LOO CV)')
+
+# pivot to wide format for direct side-by-side comparison
+lon_vs_loff_wide <- lon_vs_loff %>%
+  tidyr::pivot_wider(
+    id_cols = response_var,
+    names_from = leaf_condition,
+    values_from = c(n, RMSE, rel_RMSE, MAE, bias, rel_bias),
+    names_glue = '{leaf_condition}_{.value}'
+  ) %>%
+  dplyr::mutate(
+    diff_RMSE = lon_RMSE - loff_RMSE,
+    diff_rel_RMSE = lon_rel_RMSE - loff_rel_RMSE,
+    diff_MAE = lon_MAE - loff_MAE,
+    diff_bias = lon_bias - loff_bias,
+    diff_rel_bias = lon_rel_bias - loff_rel_bias,
+    better_season = ifelse(lon_rel_RMSE < loff_rel_RMSE, 'leaf-on', 'leaf-off'),
+    # relative improvement of better season over worse (%)
+    rel_improvement = abs(lon_rel_RMSE - loff_rel_RMSE) /
+      pmax(lon_rel_RMSE, loff_rel_RMSE) * 100
+  )
+
+# display wide comparison
+lon_vs_loff_wide %>%
+  dplyr::select(response_var,
+                lon_rel_RMSE, loff_rel_RMSE, diff_rel_RMSE,
+                lon_rel_bias, loff_rel_bias, diff_rel_bias,
+                better_season, rel_improvement) %>%
+  knitr::kable(digits = 2, caption = 'Leaf-on vs Leaf-off comparison: RTK deciduous')
+
+# plot: paired barplot of rel RMSE (leaf-on vs leaf-off) per response variable
+lon_vs_loff_plot_data <- lon_vs_loff %>%
+  dplyr::mutate(
+    response_var_label = factor(
+      forest_inv_names[response_var], levels = forest_inv_order
+    ),
+    leaf_condition_label = ifelse(
+      leaf_condition == 'lon', 'leaf-on', 'leaf-off'
+    )
+  )
+
+ggplot(lon_vs_loff_plot_data,
+       aes(x = response_var_label, y = rel_RMSE, fill = leaf_condition_label)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7,
+           color = 'black', linewidth = 0.4) +
+  geom_text(aes(label = round(rel_RMSE, 1)),
+            position = position_dodge(width = 0.8), vjust = -0.5, size = 3,
+            color = 'black', show.legend = F) +
+  scale_fill_manual(
+    values = c('leaf-on' = 'black', 'leaf-off' = 'white'),
+    name = ''
+  ) +
+  labs(x = '',
+       y = 'Relative RMSE (%)') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
+        plot.title = element_text(face = 'bold'),
+        panel.grid = element_blank(),
+        legend.key.size = unit(1.2, 'cm'))
+
+# plot: paired barplot of rel bias
+ggplot(lon_vs_loff_plot_data,
+       aes(x = response_var_label, y = rel_bias, fill = leaf_condition_label)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7,
+           color = 'black', linewidth = 0.4) +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey40') +
+  geom_text(aes(label = round(rel_bias, 1),
+                vjust = ifelse(rel_bias >= 0, -0.5, 1.5)),
+            position = position_dodge(width = 0.8), size = 3,
+            color = 'black', show.legend = F) +
+  scale_fill_manual(
+    values = c('leaf-on' = 'black', 'leaf-off' = 'white'),
+    name = ''
+  ) +
+  labs(x = '',
+       y = 'Relative Bias (%)') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
+        plot.title = element_text(face = 'bold'),
+        panel.grid = element_blank(),
+        legend.key.size = unit(1.2, 'cm'))
+
+
+# compare selected features between leaf-on and leaf-off models
+message('\n--- FFS selected features comparison (RTK deciduous) ---\n')
+for (resp in response_vars) {
+  
+  lon_model_name <- paste0('ffs_rf_', resp$name, '_lon_rtk_deciduous')
+  loff_model_name <- paste0('ffs_rf_', resp$name, '_loff_rtk_deciduous')
+  
+  lon_features <- if (lon_model_name %in% names(ffs_models)) {
+    ffs_models[[lon_model_name]]$selectedvars
+  } else {
+    NA
+  }
+  
+  loff_features <- if (loff_model_name %in% names(ffs_models)) {
+    ffs_models[[loff_model_name]]$selectedvars
+  } else {
+    NA
+  }
+  
+  message(paste0(resp$name, ':'))
+  message(paste0('  leaf-on:  ', paste(lon_features, collapse = ', ')))
+  message(paste0('  leaf-off: ', paste(loff_features, collapse = ', ')))
+  
+  if (!any(is.na(lon_features)) & !any(is.na(loff_features))) {
+    shared <- intersect(lon_features, loff_features)
+    lon_only <- setdiff(lon_features, loff_features)
+    loff_only <- setdiff(loff_features, lon_features)
+    message(paste0('  shared:     ', ifelse(length(shared) > 0, paste(shared, collapse = ', '), 'none')))
+    message(paste0('  lon only:   ', ifelse(length(lon_only) > 0, paste(lon_only, collapse = ', '), 'none')))
+    message(paste0('  loff only:  ', ifelse(length(loff_only) > 0, paste(loff_only, collapse = ', '), 'none')))
+  }
+  message('')
+}
+
+# create summary table of selected features
+ffs_features_comparison <- do.call(rbind, lapply(response_vars, function(resp) {
+  
+  lon_model_name <- paste0('ffs_rf_', resp$name, '_lon_rtk_deciduous')
+  loff_model_name <- paste0('ffs_rf_', resp$name, '_loff_rtk_deciduous')
+  
+  lon_features <- if (lon_model_name %in% names(ffs_models)) {
+    paste(ffs_models[[lon_model_name]]$selectedvars, collapse = ', ')
+  } else {
+    NA
+  }
+  
+  loff_features <- if (loff_model_name %in% names(ffs_models)) {
+    paste(ffs_models[[loff_model_name]]$selectedvars, collapse = ', ')
+  } else {
+    NA
+  }
+  
+  data.frame(
+    response = resp$name,
+    leaf_on_features = lon_features,
+    leaf_off_features = loff_features,
+    stringsAsFactors = F
+  )
+}))
+
+ffs_features_comparison %>%
+  knitr::kable(caption = 'FFS selected features: leaf-on vs leaf-off (RTK deciduous)')
 
 
 
+# 06: model transferability (RTK deciduous)
+#-------------------------------------------------------------------------------
+
+# test cross-seasonal transferability:
+# apply leaf-on model to leaf-off metrics and vice versa
+# same plots, same observed inventory values, different ALS-derived predictors
+# this tests whether metric-to-attribute relationships hold across seasons
+#
+# native baselines use NNDM LOO CV predictions (from cv_predictions)
+# to ensure a fair comparison with transfer predictions
+# transfer predictions use stats::predict() on the other season's metrics
+
+# get predictor data frames for RTK deciduous (needed for transfer predictions)
+predictors_lon <- plots_lon_rtk_deciduous_df[, predictor_start_col:ncol(plots_lon_rtk_deciduous_df)]
+predictors_loff <- plots_loff_rtk_deciduous_df[, predictor_start_col:ncol(plots_loff_rtk_deciduous_df)]
+
+# store transferability predictions for all response variables
+transfer_predictions <- list()
+
+for (resp in response_vars) {
+  
+  lon_model_name <- paste0('ffs_rf_', resp$name, '_lon_rtk_deciduous')
+  loff_model_name <- paste0('ffs_rf_', resp$name, '_loff_rtk_deciduous')
+  
+  # check that both models exist
+  if (!lon_model_name %in% names(ffs_models) | !loff_model_name %in% names(ffs_models)) {
+    message(paste0('Skipping ', resp$name, ': model(s) not found'))
+    next
+  }
+  
+  lon_model <- ffs_models[[lon_model_name]]
+  loff_model <- ffs_models[[loff_model_name]]
+  
+  # 1) + 2) native baselines from NNDM LOO CV predictions
+  cv_pred_lon_name <- paste0('pred_', resp$name, '_lon_rtk_deciduous')
+  cv_pred_loff_name <- paste0('pred_', resp$name, '_loff_rtk_deciduous')
+  
+  cv_lon <- cv_predictions[[cv_pred_lon_name]] %>% sf::st_drop_geometry()
+  cv_loff <- cv_predictions[[cv_pred_loff_name]] %>% sf::st_drop_geometry()
+  
+  # 3) leaf-on model on leaf-off data (transfer)
+  obs_loff <- plots_loff_rtk_deciduous_df[[resp$col]]
+  pred_lon_on_loff <- stats::predict(lon_model, predictors_loff)
+  
+  # 4) leaf-off model on leaf-on data (transfer)
+  obs_lon <- plots_lon_rtk_deciduous_df[[resp$col]]
+  pred_loff_on_lon <- stats::predict(loff_model, predictors_lon)
+  
+  # combine into data frame
+  transfer_df <- rbind(
+    data.frame(
+      response = resp$name,
+      scenario = 'lon model -> lon data',
+      type = 'native (CV)',
+      obs = cv_lon$obs,
+      pred = cv_lon$pred
+    ),
+    data.frame(
+      response = resp$name,
+      scenario = 'loff model -> loff data',
+      type = 'native (CV)',
+      obs = cv_loff$obs,
+      pred = cv_loff$pred
+    ),
+    data.frame(
+      response = resp$name,
+      scenario = 'lon model -> loff data',
+      type = 'transfer',
+      obs = obs_loff,
+      pred = pred_lon_on_loff
+    ),
+    data.frame(
+      response = resp$name,
+      scenario = 'loff model -> lon data',
+      type = 'transfer',
+      obs = obs_lon,
+      pred = pred_loff_on_lon
+    )
+  )
+  
+  transfer_predictions[[resp$name]] <- transfer_df
+}
+
+# combine all transfer predictions
+all_transfer <- dplyr::bind_rows(transfer_predictions)
+
+# calculate error metrics for all combinations
+transfer_metrics <- all_transfer %>%
+  dplyr::group_by(response, scenario, type) %>%
+  dplyr::summarise(
+    n = dplyr::n(),
+    RMSE = sqrt(mean((pred - obs)^2, na.rm = T)),
+    mean_obs = mean(obs, na.rm = T),
+    rel_RMSE = sqrt(mean((pred - obs)^2, na.rm = T)) / mean(obs, na.rm = T) * 100,
+    MAE = mean(abs(pred - obs), na.rm = T),
+    bias = mean(pred - obs, na.rm = T),
+    rel_bias = mean(pred - obs, na.rm = T) / mean(obs, na.rm = T) * 100,
+    .groups = 'drop'
+  )
+
+# display full results table
+transfer_metrics %>%
+  dplyr::select(response, scenario, type, n, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
+  dplyr::arrange(response, scenario) %>%
+  knitr::kable(digits = 2, caption = 'Transferability: RTK deciduous (all 4 combinations)')
+
+# pivot to compare native vs transfer performance
+transfer_comparison <- transfer_metrics %>%
+  dplyr::select(response, scenario, type, rel_RMSE, rel_bias) %>%
+  dplyr::mutate(
+    model_season = dplyr::case_when(
+      grepl('^lon model', scenario) ~ 'leaf-on',
+      grepl('^loff model', scenario) ~ 'leaf-off'
+    ),
+    data_season = dplyr::case_when(
+      grepl('lon data$', scenario) ~ 'leaf-on',
+      grepl('loff data$', scenario) ~ 'leaf-off'
+    )
+  )
+
+# calculate degradation: how much worse is transfer vs native (CV)?
+transfer_degradation <- transfer_comparison %>%
+  dplyr::mutate(
+    type_short = ifelse(grepl('native', type), 'native', 'transfer')
+  ) %>%
+  tidyr::pivot_wider(
+    id_cols = c(response, model_season),
+    names_from = type_short,
+    values_from = c(rel_RMSE, rel_bias),
+    names_glue = '{type_short}_{.value}'
+  ) %>%
+  dplyr::mutate(
+    degradation_rel_RMSE = transfer_rel_RMSE - native_rel_RMSE,
+    degradation_pct = (transfer_rel_RMSE - native_rel_RMSE) / native_rel_RMSE * 100
+  )
+
+transfer_degradation %>%
+  dplyr::select(response, model_season,
+                native_rel_RMSE, transfer_rel_RMSE,
+                degradation_rel_RMSE, degradation_pct,
+                native_rel_bias, transfer_rel_bias) %>%
+  dplyr::arrange(response, model_season) %>%
+  knitr::kable(digits = 2, caption = 'Transfer degradation: RTK deciduous (native = NNDM LOO CV)')
+
+# plot: grouped barplot of rel RMSE across all 4 scenarios
+transfer_plot_data <- transfer_comparison %>%
+  dplyr::mutate(
+    response_label = factor(forest_inv_names[response], levels = forest_inv_order),
+    scenario_label = factor(scenario,
+      levels = c('loff model -> loff data', 'lon model -> lon data',
+                 'loff model -> lon data', 'lon model -> loff data'),
+      labels = c('leaf-off -> leaf-off', 'leaf-on -> leaf-on',
+                 'leaf-off -> leaf-on', 'leaf-on -> leaf-off')
+    )
+  )
+
+ggplot(transfer_plot_data,
+       aes(x = response_label, y = rel_RMSE,
+           pattern = scenario_label, fill = scenario_label,
+           pattern_fill = scenario_label)) +
+  ggpattern::geom_col_pattern(
+    position = position_dodge(width = 0.85), width = 0.75,
+    color = 'black', linewidth = 0.4,
+    pattern_density = 0.15, pattern_spacing = 0.05,
+    pattern_angle = 45, pattern_size = 0.3
+  ) +
+  geom_text(aes(label = round(rel_RMSE, 1)),
+            position = position_dodge(width = 0.85), vjust = -0.5, size = 2.5,
+            color = 'black', show.legend = F) +
+  scale_fill_manual(
+    values = c('leaf-on -> leaf-on' = 'black',
+               'leaf-off -> leaf-off' = 'white',
+               'leaf-on -> leaf-off' = 'black',
+               'leaf-off -> leaf-on' = 'white'),
+    name = ''
+  ) +
+  ggpattern::scale_pattern_manual(
+    values = c('leaf-on -> leaf-on' = 'none',
+               'leaf-off -> leaf-off' = 'none',
+               'leaf-on -> leaf-off' = 'stripe',
+               'leaf-off -> leaf-on' = 'stripe'),
+    name = ''
+  ) +
+  ggpattern::scale_pattern_fill_manual(
+    values = c('leaf-on -> leaf-on' = NA,
+               'leaf-off -> leaf-off' = NA,
+               'leaf-on -> leaf-off' = 'white',
+               'leaf-off -> leaf-on' = 'black'),
+    name = ''
+  ) +
+  labs(x = '',
+       y = 'Relative RMSE (%)') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
+        plot.title = element_text(face = 'bold'),
+        panel.grid = element_blank(),
+        legend.key.size = unit(1.2, 'cm'))
+
+# plot: grouped barplot of rel bias across all 4 scenarios
+ggplot(transfer_plot_data,
+       aes(x = response_label, y = rel_bias,
+           pattern = scenario_label, fill = scenario_label,
+           pattern_fill = scenario_label)) +
+  ggpattern::geom_col_pattern(
+    position = position_dodge(width = 0.85), width = 0.75,
+    color = 'black', linewidth = 0.4,
+    pattern_density = 0.15, pattern_spacing = 0.05,
+    pattern_angle = 45, pattern_size = 0.3
+  ) +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey40') +
+  geom_text(aes(label = round(rel_bias, 1),
+                vjust = ifelse(rel_bias >= 0, -0.5, 1.5)),
+            position = position_dodge(width = 0.85), size = 2.5,
+            color = 'black', show.legend = F) +
+  scale_fill_manual(
+    values = c('leaf-on -> leaf-on' = 'black',
+               'leaf-off -> leaf-off' = 'white',
+               'leaf-on -> leaf-off' = 'black',
+               'leaf-off -> leaf-on' = 'white'),
+    name = ''
+  ) +
+  ggpattern::scale_pattern_manual(
+    values = c('leaf-on -> leaf-on' = 'none',
+               'leaf-off -> leaf-off' = 'none',
+               'leaf-on -> leaf-off' = 'stripe',
+               'leaf-off -> leaf-on' = 'stripe'),
+    name = ''
+  ) +
+  ggpattern::scale_pattern_fill_manual(
+    values = c('leaf-on -> leaf-on' = NA,
+               'leaf-off -> leaf-off' = NA,
+               'leaf-on -> leaf-off' = 'white',
+               'leaf-off -> leaf-on' = 'black'),
+    name = ''
+  ) +
+  labs(x = '',
+       y = 'Relative Bias (%)') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
+        plot.title = element_text(face = 'bold'),
+        panel.grid = element_blank(),
+        legend.key.size = unit(1.2, 'cm'))
+
+# plot: predicted vs observed for all 4 scenarios (faceted)
+for (resp in unique(all_transfer$response)) {
+  
+  plot_data_transfer <- all_transfer %>%
+    dplyr::filter(response == resp) %>%
+    dplyr::mutate(
+      scenario_label = factor(scenario,
+        levels = c('lon model -> lon data', 'loff model -> loff data',
+                   'lon model -> loff data', 'loff model -> lon data'),
+        labels = c('leaf-on -> leaf-on', 'leaf-off -> leaf-off',
+                   'leaf-on -> leaf-off', 'leaf-off -> leaf-on')
+      )
+    )
+  
+  if (nrow(plot_data_transfer) == 0) next
+  
+  forest_inv_label <- forest_inv_names[resp]
+  axis_max <- max(c(plot_data_transfer$obs, plot_data_transfer$pred), na.rm = T)
+  axis_min <- min(c(plot_data_transfer$obs, plot_data_transfer$pred), na.rm = T)
+  
+  # get metrics for annotation
+  metrics_for_plot <- transfer_metrics %>%
+    dplyr::filter(response == resp) %>%
+    dplyr::mutate(
+      scenario_label = factor(scenario,
+        levels = c('lon model -> lon data', 'loff model -> loff data',
+                   'lon model -> loff data', 'loff model -> lon data'),
+        labels = c('leaf-on -> leaf-on', 'leaf-off -> leaf-off',
+                   'leaf-on -> leaf-off', 'leaf-off -> leaf-on')
+      ),
+      label = paste0('rRMSE: ', round(rel_RMSE, 1), '%\n',
+                     'rBias: ', round(rel_bias, 1), '%')
+    )
+  
+  p <- ggplot(plot_data_transfer, aes(x = obs, y = pred)) +
+    geom_point(alpha = 0.6, size = 2) +
+    geom_abline(slope = 1, intercept = 0, linewidth = 0.8,
+                color = 'red', linetype = 'dashed') +
+    geom_smooth(method = 'lm', se = F, linewidth = 0.8, color = 'black') +
+    geom_text(data = metrics_for_plot,
+              aes(x = axis_min + (axis_max - axis_min) * 0.05,
+                  y = axis_max - (axis_max - axis_min) * 0.05,
+                  label = label),
+              hjust = 0, vjust = 1, size = 3) +
+    facet_wrap(~ scenario_label, ncol = 2) +
+    coord_fixed(ratio = 1, xlim = c(axis_min, axis_max),
+                ylim = c(axis_min, axis_max)) +
+    labs(title = paste0('Transferability: ', forest_inv_label),
+         subtitle = 'RTK deciduous plots',
+         x = 'Observed',
+         y = 'Predicted') +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+          strip.background = element_rect(fill = 'lightgrey'),
+          strip.text = element_text(face = 'bold'),
+          panel.grid = element_blank())
+  
+  print(p)
+}
+
+
+
+# 07: ALS metrics comparison leaf-on vs leaf-off (RTK deciduous)
+#-------------------------------------------------------------------------------
+
+# compare the ALS-derived predictor metrics between seasons
+# at the same plot locations (RTK deciduous)
+# predictors_lon and predictors_loff are already defined in section 06
+
+# get metric names (should be identical for both seasons)
+metric_names <- colnames(predictors_lon)
+
+# define display order for metrics
+metric_order <- c(
+  'BE_H_MEAN', 'BE_H_MAX',
+  'BE_H_P90', 'BE_H_P80', 'BE_H_P70', 'BE_H_P60', 'BE_H_P50',
+  'BE_H_P40', 'BE_H_P30', 'BE_H_P20', 'BE_H_P10',
+  'BE_H_SKEW', 'BE_H_KURTOSIS',
+  'BE_H_SD', 'BE_H_VAR',
+  'BE_PR_10', 'BE_PR_02', 'BE_RD_10', 'BE_RD_02',
+  'point_density', 'pulse_returns_mean'
+)
+
+# keep only metrics that exist in the data, preserve custom order
+metric_order <- metric_order[metric_order %in% metric_names]
+# append any remaining metrics not in the custom order
+metric_order <- c(metric_order, setdiff(metric_names, metric_order))
+
+# build long-format data frame for all metrics
+metrics_comparison <- do.call(rbind, lapply(metric_names, function(m) {
+  data.frame(
+    metric = m,
+    leaf_on = predictors_lon[[m]],
+    leaf_off = predictors_loff[[m]]
+  )
+}))
+
+# calculate per-metric summary statistics
+metrics_summary <- do.call(rbind, lapply(metric_names, function(m) {
+  lon_vals <- predictors_lon[[m]]
+  loff_vals <- predictors_loff[[m]]
+  
+  data.frame(
+    metric = m,
+    mean_lon = mean(lon_vals, na.rm = T),
+    mean_loff = mean(loff_vals, na.rm = T),
+    diff_mean = mean(lon_vals, na.rm = T) - mean(loff_vals, na.rm = T),
+    rel_diff_mean = (mean(lon_vals, na.rm = T) - mean(loff_vals, na.rm = T)) /
+      mean(lon_vals, na.rm = T) * 100,
+    sd_lon = sd(lon_vals, na.rm = T),
+    sd_loff = sd(loff_vals, na.rm = T),
+    cor_pearson = cor(lon_vals, loff_vals, use = 'complete.obs', method = 'pearson'),
+    rmsd = sqrt(mean((lon_vals - loff_vals)^2, na.rm = T)),
+    stringsAsFactors = F
+  )
+}))
+
+# scatterplots: one per metric (leaf-on vs leaf-off) using facet_wrap
+
+# pivot to long format
+metrics_long_lon <- predictors_lon %>%
+  dplyr::mutate(plot_id = dplyr::row_number()) %>%
+  tidyr::pivot_longer(cols = -plot_id, names_to = 'metric', values_to = 'leaf_on')
+
+metrics_long_loff <- predictors_loff %>%
+  dplyr::mutate(plot_id = dplyr::row_number()) %>%
+  tidyr::pivot_longer(cols = -plot_id, names_to = 'metric', values_to = 'leaf_off')
+
+metrics_long <- dplyr::inner_join(metrics_long_lon, metrics_long_loff,
+                                  by = c('plot_id', 'metric')) %>%
+  dplyr::mutate(metric = factor(metric, levels = metric_order))
+
+# calculate r per metric for annotation
+r_values <- metrics_long %>%
+  dplyr::group_by(metric) %>%
+  dplyr::summarise(
+    r = cor(leaf_on, leaf_off, use = 'complete.obs'),
+    .groups = 'drop'
+  ) %>%
+  dplyr::mutate(
+    label = paste0('r = ', round(r, 2)),
+    metric = factor(metric, levels = metric_order)
+  )
+
+# compute shared axis range per metric (min/max across both seasons)
+axis_ranges <- metrics_long %>%
+  dplyr::group_by(metric) %>%
+  dplyr::summarise(
+    axis_min = min(c(leaf_on, leaf_off), na.rm = T),
+    axis_max = max(c(leaf_on, leaf_off), na.rm = T),
+    .groups = 'drop'
+  )
+
+# create dummy points to force equal x and y scales per facet
+dummy_points <- rbind(
+  data.frame(metric = axis_ranges$metric,
+             leaf_on = axis_ranges$axis_min, leaf_off = axis_ranges$axis_min),
+  data.frame(metric = axis_ranges$metric,
+             leaf_on = axis_ranges$axis_max, leaf_off = axis_ranges$axis_max)
+)
+
+# faceted scatterplot
+metrics_long %>%
+  ggplot(aes(x = leaf_on, y = leaf_off)) +
+  geom_point(data = dummy_points, alpha = 0) +
+  geom_point(alpha = 0.6, size = 0.8) +
+  geom_abline(slope = 1, intercept = 0, linetype = 'dashed', color = 'red') +
+  geom_smooth(method = 'lm', se = F, color = 'black', linewidth = 0.6) +
+  geom_text(data = r_values,
+            aes(x = -Inf, y = Inf, label = label),
+            hjust = -0.1, vjust = 1.5, size = 3, inherit.aes = F) +
+  facet_wrap(~ metric, scales = 'free', ncol = 7) +
+  labs(x = 'leaf-on', y = 'leaf-off') +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        plot.margin = margin(5, 10, 5, 5, 'mm'))
+
+# plot: bar chart of absolute difference in mean per metric
+ggplot(metrics_summary %>%
+         dplyr::mutate(metric = factor(metric, levels = rev(metric_order))),
+       aes(x = metric, y = diff_mean,
+           fill = diff_mean > 0)) +
+  geom_col(color = 'black', linewidth = 0.3, width = 0.7) +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey40') +
+  scale_fill_manual(
+    values = c('TRUE' = 'black', 'FALSE' = 'white'),
+    labels = c('TRUE' = 'higher in leaf-on', 'FALSE' = 'higher in leaf-off'),
+    name = ''
+  ) +
+  labs(x = '',
+       y = 'Mean difference (leaf-on minus leaf-off)') +
+  coord_flip() +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold'),
+        panel.grid = element_blank(),
+        legend.key.size = unit(1.2, 'cm'))
+
+
+
+# 08: statistical testing leaf-on vs leaf-off metrics (RTK deciduous)
+#-------------------------------------------------------------------------------
+
+# paired comparison: same plots measured under two canopy conditions
+# step 1: test normality of the paired DIFFERENCES (not the raw values)
+# step 2: paired Wilcoxon signed-rank test with multiple testing correction
+
+# compute paired differences per metric (wide format already available)
+metrics_wide <- data.frame(
+  plot_id = seq_len(nrow(predictors_lon))
+)
+for (m in metric_names) {
+  metrics_wide[[m]] <- predictors_lon[[m]] - predictors_loff[[m]]
+}
+
+# Shapiro-Wilk test on paired differences
+shapiro_results <- do.call(rbind, lapply(metric_names, function(m) {
+  diffs <- metrics_wide[[m]]
+  diffs <- diffs[!is.na(diffs)]
+  
+  # Shapiro-Wilk limited to n <= 5000
+  if (length(diffs) > 5000) diffs <- sample(diffs, 5000)
+  
+  sw <- stats::shapiro.test(diffs)
+  
+  data.frame(
+    metric = m,
+    W = sw$statistic,
+    p_value = sw$p.value,
+    normal = sw$p.value >= 0.05,
+    stringsAsFactors = F
+  )
+}))
+
+shapiro_results$signif <- ifelse(shapiro_results$p_value < 0.05, '***', '')
+
+message('\n--- Shapiro-Wilk test on paired differences (leaf-on minus leaf-off) ---')
+shapiro_results %>%
+  dplyr::mutate(metric = factor(metric, levels = metric_order)) %>%
+  dplyr::arrange(metric) %>%
+  knitr::kable(digits = 4,
+               caption = 'Shapiro-Wilk normality test on paired differences (RTK deciduous)')
+
+n_normal <- sum(shapiro_results$normal)
+n_total <- nrow(shapiro_results)
+message(paste0(n_normal, ' of ', n_total,
+               ' metrics have normally distributed differences (p >= 0.05)'))
+message(paste0('Normal: ',
+               paste(shapiro_results$metric[shapiro_results$normal], collapse = ', ')))
+message(paste0('Non-normal: ',
+               paste(shapiro_results$metric[!shapiro_results$normal], collapse = ', ')))
+
+# paired Wilcoxon signed-rank test
+# used regardless of normality for consistency across all metrics
+wilcox_results <- do.call(rbind, lapply(metric_names, function(m) {
+  lon_vals <- predictors_lon[[m]]
+  loff_vals <- predictors_loff[[m]]
+  
+  # remove pairs with NA in either season
+  complete <- !is.na(lon_vals) & !is.na(loff_vals)
+  lon_vals <- lon_vals[complete]
+  loff_vals <- loff_vals[complete]
+  
+  wt <- stats::wilcox.test(lon_vals, loff_vals, paired = T)
+  
+  data.frame(
+    metric = m,
+    n_pairs = length(lon_vals),
+    mean_diff = mean(lon_vals - loff_vals),
+    median_diff = median(lon_vals - loff_vals),
+    V = wt$statistic,
+    p_value = wt$p.value,
+    stringsAsFactors = F
+  )
+}))
+
+wilcox_results$signif <- dplyr::case_when(
+  wilcox_results$p_value < 0.001 ~ '***',
+  wilcox_results$p_value < 0.01 ~ '**',
+  wilcox_results$p_value < 0.05 ~ '*',
+  T ~ 'n.s.'
+)
+
+message('\n--- Paired Wilcoxon signed-rank test (leaf-on vs leaf-off) ---')
+wilcox_results %>%
+  dplyr::mutate(metric = factor(metric, levels = metric_order)) %>%
+  dplyr::arrange(metric) %>%
+  knitr::kable(digits = 4,
+               caption = 'Paired Wilcoxon test: leaf-on vs leaf-off (RTK deciduous)')
+
+n_signif <- sum(wilcox_results$p_value < 0.05)
+message(paste0('\n', n_signif, ' of ', n_total,
+               ' metrics show significant differences (p < 0.05)'))
+message(paste0('Not significant: ',
+               paste(wilcox_results$metric[wilcox_results$p_value >= 0.05], collapse = ', ')))
 
 
 
