@@ -25,35 +25,25 @@ source('src/setup.R', local = TRUE)
 # 01 - data reading
 #-------------------------------------------------------------------------------
 
-# read data with forest inventory plots (BI) 
-# and calculated metrics (leaf-on and leaf-off, RTK and non-RTK)
-plot_metrics_lon_rtk <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon_rtk.gpkg')
+# read forest inventory plots (BI) with their attributes
+# and calculated ALS metrics (leaf-on and leaf-off)9
+plot_metrics_lon <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
 )
 
-plot_metrics_loff_rtk <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff_rtk.gpkg')
+plot_metrics_loff<- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
 )
 
-plot_metrics_lon_non_rtk <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon_non_rtk.gpkg')
-)
-
-plot_metrics_loff_non_rtk <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff_non_rtk.gpkg')
-)
-
-head(plot_metrics_lon_rtk)
-head(plot_metrics_loff_rtk)
-head(plot_metrics_lon_non_rtk)
-head(plot_metrics_loff_non_rtk)
-str(plot_metrics_lon_rtk)
-str(plot_metrics_loff_rtk)
+head(plot_metrics_lon)
+head(plot_metrics_loff)
+str(plot_metrics_lon)
+str(plot_metrics_loff)
 
 # read extent of the leaf-off dataset
 ext_loff <- sf::st_read(
-  file.path(processed_data_dir, 'pc_leafoff_2024', 'leafoff_ppm4.vpc')
-  )
+  file.path(raw_data_dir, 'pc_leafoff_2024', 'leafoff.vpc')
+)
 
 # read pixel centroids from w2w-metrics raster
 pixel_centroids <- sf::st_read(
@@ -62,9 +52,9 @@ pixel_centroids <- sf::st_read(
 
 # split pixel centroids based on dominant leaf type
 pixel_centroids_deciduous <- pixel_centroids %>% 
-  dplyr::filter(dominant_leaf_type1 == 1)
+  dplyr::filter(leaf_type_code == 1)
 pixel_centroids_coniferous <- pixel_centroids %>% 
-  dplyr::filter(dominant_leaf_type1 == 2)
+  dplyr::filter(leaf_type_code == 2)
 
 # plot data
 #ggplot() +
@@ -80,49 +70,27 @@ pixel_centroids_coniferous <- pixel_centroids %>%
 # 02: data preparation
 #-------------------------------------------------------------------------------
 
-# filter plots by dominant leaf type (leaf-on RTK)
-plots_lon_rtk_deciduous <- plot_metrics_lon_rtk %>%
+# filter plots by dominant leaf type (leaf-on)
+plots_lon_deciduous <- plot_metrics_lon %>%
   dplyr::filter(dominant_leaf_type == 'deciduous')
-plots_lon_rtk_coniferous <- plot_metrics_lon_rtk %>%
+plots_lon_coniferous <- plot_metrics_lon %>%
   dplyr::filter(dominant_leaf_type == 'coniferous')
 
-# filter plots by dominant leaf type (leaf-off RTK)
-plots_loff_rtk_deciduous <- plot_metrics_loff_rtk %>%
+# filter plots by dominant leaf type (leaf-off)
+plots_loff_deciduous <- plot_metrics_loff %>%
   dplyr::filter(dominant_leaf_type == 'deciduous')
-plots_loff_rtk_coniferous <- plot_metrics_loff_rtk %>%
+plots_loff_coniferous <- plot_metrics_loff %>%
   dplyr::filter(dominant_leaf_type == 'coniferous')
 
-# filter plots by dominant leaf type (leaf-on non-RTK)
-plots_lon_non_rtk_deciduous <- plot_metrics_lon_non_rtk %>%
-  dplyr::filter(dominant_leaf_type == 'deciduous')
-plots_lon_non_rtk_coniferous <- plot_metrics_lon_non_rtk %>%
-  dplyr::filter(dominant_leaf_type == 'coniferous')
+# df versions (leaf-on)
+plots_lon_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon))
+plots_lon_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_deciduous))
+plots_lon_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_coniferous))
 
-# filter plots by dominant leaf type (leaf-off non-RTK)
-plots_loff_non_rtk_deciduous <- plot_metrics_loff_non_rtk %>%
-  dplyr::filter(dominant_leaf_type == 'deciduous')
-plots_loff_non_rtk_coniferous <- plot_metrics_loff_non_rtk %>%
-  dplyr::filter(dominant_leaf_type == 'coniferous')
-
-# df versions (leaf-on RTK)
-plots_lon_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon_rtk))
-plots_lon_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_rtk_deciduous))
-plots_lon_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_rtk_coniferous))
-
-# df versions (leaf-off RTK)
-plots_loff_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff_rtk))
-plots_loff_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_rtk_deciduous))
-plots_loff_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_rtk_coniferous))
-
-# df versions (leaf-on non-RTK)
-plots_lon_non_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_lon_non_rtk))
-plots_lon_non_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_non_rtk_deciduous))
-plots_lon_non_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lon_non_rtk_coniferous))
-
-# df versions (leaf-off non-RTK)
-plots_loff_non_rtk_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff_non_rtk))
-plots_loff_non_rtk_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_non_rtk_deciduous))
-plots_loff_non_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_non_rtk_coniferous))
+# df versions (leaf-off)
+plots_loff_all_df <- as.data.frame(sf::st_drop_geometry(plot_metrics_loff))
+plots_loff_deciduous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_deciduous))
+plots_loff_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_loff_coniferous))
 
 
 
@@ -130,16 +98,13 @@ plots_loff_non_rtk_coniferous_df <- as.data.frame(sf::st_drop_geometry(plots_lof
 #-------------------------------------------------------------------------------
 
 # define data combinations for CV comparison
-# (RTK vs non-RTK) x (deciduous vs coniferous vs all)
+# (deciduous vs coniferous vs all)
 # leaf-on vs leaf-off not differentiated as plot positions are the same
 
 data_list <- list(
-  rtk_all = list(data = plot_metrics_lon_rtk, predpoints = pixel_centroids),
-  rtk_deciduous = list(data = plots_lon_rtk_deciduous, predpoints = pixel_centroids_deciduous),
-  rtk_coniferous = list(data = plots_lon_rtk_coniferous, predpoints = pixel_centroids_coniferous),
-  non_rtk_all = list(data = plot_metrics_lon_non_rtk, predpoints = pixel_centroids),
-  non_rtk_deciduous = list(data = plots_lon_non_rtk_deciduous, predpoints = pixel_centroids_deciduous),
-  non_rtk_coniferous = list(data = plots_lon_non_rtk_coniferous, predpoints = pixel_centroids_coniferous)
+  all = list(data = plot_metrics_lon, predpoints = pixel_centroids),
+  deciduous = list(data = plots_lon_deciduous, predpoints = pixel_centroids_deciduous),
+  coniferous = list(data = plots_lon_coniferous, predpoints = pixel_centroids_coniferous)
 )
 
 # function to compute CV methods for the different datasets
@@ -217,55 +182,58 @@ gridExtra::grid.arrange(grobs = fold5_plots, ncol = 3,
 gridExtra::grid.arrange(grobs = nndm_plots, ncol = 3, 
                         top = 'NNDM - ECDF Comparison')
 
-# plot showing how NNDM works - RTK coniferous example
+# plot showing how NNDM works - coniferous example
 # cv iteration with the most excluded plots
-nndm_rtk_coniferous <- cv_results$rtk_coniferous$nndm
-id_plot_coniferous <- which.max(sapply(nndm_rtk_coniferous$indx_exclude, length))
+nndm_coniferous <- cv_results$coniferous$nndm
+id_plot_coniferous <- which.max(sapply(nndm_coniferous$indx_exclude, length))
 
-rtk_coniferous_plot <- plots_lon_rtk_coniferous
-rtk_coniferous_plot$set <- ""
-rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_train[[id_plot_coniferous]]] <- 'train'
-rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_exclude[[id_plot_coniferous]]] <- 'exclude'
-rtk_coniferous_plot$set[nndm_rtk_coniferous$indx_test[[id_plot_coniferous]]] <- 'test'
-rtk_coniferous_plot <- rtk_coniferous_plot[order(rtk_coniferous_plot$set),]
+coniferous_plot <- plots_lon_coniferous
+coniferous_plot$set <- ""
+coniferous_plot$set[nndm_coniferous$indx_train[[id_plot_coniferous]]] <- 'train'
+coniferous_plot$set[nndm_coniferous$indx_exclude[[id_plot_coniferous]]] <- 'exclude'
+coniferous_plot$set[nndm_coniferous$indx_test[[id_plot_coniferous]]] <- 'test'
+coniferous_plot <- coniferous_plot[order(coniferous_plot$set),]
 
-ggplot() +
+p_coniferous <- ggplot() +
   geom_sf(data = ext_loff, fill = 'grey', alpha = 0.1) +
-  geom_sf(data = rtk_coniferous_plot, aes(col = set)) +
+  geom_sf(data = coniferous_plot, aes(col = set)) +
   scale_color_brewer(palette = 'Dark2') +
   theme_bw() +
-  ggtitle('NNDM visualization - RTK coniferous',
+  ggtitle('NNDM visualization - coniferous',
           subtitle = 'CV iteration with most excluded plots')
 
-# plot showing how NNDM works - RTK deciduous example
+# plot showing how NNDM works - deciduous example
 # cv iteration with the most excluded plots
-nndm_rtk_deciduous <- cv_results$rtk_deciduous$nndm
-id_plot_deciduous <- which.max(sapply(nndm_rtk_deciduous$indx_exclude, length))
+nndm_deciduous <- cv_results$deciduous$nndm
+id_plot_deciduous <- which.max(sapply(nndm_deciduous$indx_exclude, length))
 
-rtk_deciduous_plot <- plots_lon_rtk_deciduous
-rtk_deciduous_plot$set <- ""
-rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_train[[id_plot_deciduous]]] <- 'train'
-rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_exclude[[id_plot_deciduous]]] <- 'exclude'
-rtk_deciduous_plot$set[nndm_rtk_deciduous$indx_test[[id_plot_deciduous]]] <- 'test'
-rtk_deciduous_plot <- rtk_deciduous_plot[order(rtk_deciduous_plot$set),]
+deciduous_plot <- plots_lon_deciduous
+deciduous_plot$set <- ""
+deciduous_plot$set[nndm_deciduous$indx_train[[id_plot_deciduous]]] <- 'train'
+deciduous_plot$set[nndm_deciduous$indx_exclude[[id_plot_deciduous]]] <- 'exclude'
+deciduous_plot$set[nndm_deciduous$indx_test[[id_plot_deciduous]]] <- 'test'
+deciduous_plot <- deciduous_plot[order(deciduous_plot$set),]
 
-ggplot() +
+p_deciduous <- ggplot() +
   geom_sf(data = ext_loff, fill = 'grey', alpha = 0.1) +
-  geom_sf(data = rtk_deciduous_plot, aes(col = set)) +
+  geom_sf(data = deciduous_plot, aes(col = set)) +
   scale_color_brewer(palette = 'Dark2') +
   theme_bw() +
-  ggtitle('NNDM visualization - RTK deciduous',
+  ggtitle('NNDM visualization - deciduous',
           subtitle = 'CV iteration with most excluded plots')
 
-# fit models and estimate their performance (RTK and leaf-on only)
+# show the two plots side by side
+cowplot::plot_grid(p_coniferous, p_deciduous, ncol = 2)
+
+# fit models and estimate their performance (leaf-on only)
 data_df_list <- list(
-  rtk_all = plots_lon_rtk_all_df,
-  rtk_deciduous = plots_lon_rtk_deciduous_df,
-  rtk_coniferous = plots_lon_rtk_coniferous_df
+  all = plots_lon_all_df,
+  deciduous = plots_lon_deciduous_df,
+  coniferous = plots_lon_coniferous_df
 )
 
 # function to fit RF models with different CV methods
-fit_cv_models <- function(data_df, nndm_result, predictor_start_col = 13) {
+fit_cv_models <- function(data_df, nndm_result, predictor_start_col = 17) {
   
   # LOO CV
   loo_ctrl <- caret::trainControl(method = 'LOOCV', savePredictions = T)
