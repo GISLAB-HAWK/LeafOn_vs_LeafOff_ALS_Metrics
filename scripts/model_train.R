@@ -323,93 +323,51 @@ cv_validation_results |>
 #-------------------------------------------------------------------------------
 
 # define all training datasets
-# structure: list with data (sf), predictors (df), and matching pixel_centroids
-predictor_start_col <- 13
+# structure: list with data, predictors, and matching pixel centroids
+predictor_start_col <- 17
 
 training_data <- list(
-  # RTK datasets
-  lon_rtk_all = list(
-    data = plot_metrics_lon_rtk,
+  # leaf-on datasets
+  lon_all = list(
+    data = plot_metrics_lon,
     predictors = sf::st_drop_geometry(
-      plot_metrics_lon_rtk[, predictor_start_col:ncol(plot_metrics_lon_rtk)]
+      plot_metrics_lon[, predictor_start_col:ncol(plot_metrics_lon)]
       ),
     predpoints = pixel_centroids
   ),
-  lon_rtk_deciduous = list(
-    data = plots_lon_rtk_deciduous,
+  lon_deciduous = list(
+    data = plots_lon_deciduous,
     predictors = sf::st_drop_geometry(
-      plots_lon_rtk_deciduous[, predictor_start_col:ncol(plots_lon_rtk_deciduous)]
+      plots_lon_deciduous[, predictor_start_col:ncol(plots_lon_deciduous)]
       ),
     predpoints = pixel_centroids_deciduous
   ),
-  lon_rtk_coniferous = list(
-    data = plots_lon_rtk_coniferous,
+  lon_coniferous = list(
+    data = plots_lon_coniferous,
     predictors = sf::st_drop_geometry(
-      plots_lon_rtk_coniferous[, predictor_start_col:ncol(plots_lon_rtk_coniferous)]
+      plots_lon_coniferous[, predictor_start_col:ncol(plots_lon_coniferous)]
       ),
     predpoints = pixel_centroids_coniferous
   ),
-  loff_rtk_all = list(
-    data = plot_metrics_loff_rtk,
+  # leaf-off datasets
+  loff_all = list(
+    data = plot_metrics_loff,
     predictors = sf::st_drop_geometry(
-      plot_metrics_loff_rtk[, predictor_start_col:ncol(plot_metrics_loff_rtk)]
+      plot_metrics_loff[, predictor_start_col:ncol(plot_metrics_loff)]
       ),
     predpoints = pixel_centroids
   ),
-  loff_rtk_deciduous = list(
-    data = plots_loff_rtk_deciduous,
+  loff_deciduous = list(
+    data = plots_loff_deciduous,
     predictors = sf::st_drop_geometry(
-      plots_loff_rtk_deciduous[, predictor_start_col:ncol(plots_loff_rtk_deciduous)]
+      plots_loff_deciduous[, predictor_start_col:ncol(plots_loff_deciduous)]
       ),
     predpoints = pixel_centroids_deciduous
   ),
-  loff_rtk_coniferous = list(
-    data = plots_loff_rtk_coniferous,
+  loff_coniferous = list(
+    data = plots_loff_coniferous,
     predictors = sf::st_drop_geometry(
-      plots_loff_rtk_coniferous[, predictor_start_col:ncol(plots_loff_rtk_coniferous)]
-      ),
-    predpoints = pixel_centroids_coniferous
-  ),
-  # non-RTK datasets
-  lon_non_rtk_all = list(
-    data = plot_metrics_lon_non_rtk,
-    predictors = sf::st_drop_geometry(
-      plot_metrics_lon_non_rtk[, predictor_start_col:ncol(plot_metrics_lon_non_rtk)]
-      ),
-    predpoints = pixel_centroids
-  ),
-  lon_non_rtk_deciduous = list(
-    data = plots_lon_non_rtk_deciduous,
-    predictors = sf::st_drop_geometry(
-      plots_lon_non_rtk_deciduous[, predictor_start_col:ncol(plots_lon_non_rtk_deciduous)]
-      ),
-    predpoints = pixel_centroids_deciduous
-  ),
-  lon_non_rtk_coniferous = list(
-    data = plots_lon_non_rtk_coniferous,
-    predictors = sf::st_drop_geometry(
-      plots_lon_non_rtk_coniferous[, predictor_start_col:ncol(plots_lon_non_rtk_coniferous)]
-      ),
-    predpoints = pixel_centroids_coniferous
-  ),
-  loff_non_rtk_all = list(
-    data = plot_metrics_loff_non_rtk,
-    predictors = sf::st_drop_geometry(
-      plot_metrics_loff_non_rtk[, predictor_start_col:ncol(plot_metrics_loff_non_rtk)]
-      ),
-    predpoints = pixel_centroids
-  ),
-  loff_non_rtk_deciduous = list(
-    data = plots_loff_non_rtk_deciduous,
-    predictors = sf::st_drop_geometry(
-      plots_loff_non_rtk_deciduous[, predictor_start_col:ncol(plots_loff_non_rtk_deciduous)]
-      ),
-    predpoints = pixel_centroids_deciduous
-  ),
-  loff_non_rtk_coniferous = list(
-    data = plots_loff_non_rtk_coniferous,
-    predictors = sf::st_drop_geometry(
-      plots_loff_non_rtk_coniferous[, predictor_start_col:ncol(plots_loff_non_rtk_coniferous)]
+      plots_loff_coniferous[, predictor_start_col:ncol(plots_loff_coniferous)]
       ),
     predpoints = pixel_centroids_coniferous
   )
@@ -440,36 +398,41 @@ names(train_controls) <- names(training_data)
 
 # create grid for tuning features
 tgrid <- expand.grid(
-  mtry = 1:3,
-  splitrule = c('variance', 'extratrees', 'maxstat'),
-  min.node.size = c(5, 10, 15, 20)
+  mtry          = 1:3,
+  splitrule     = 'variance',
+  min.node.size = 5
 )
 
-# correlation plots for selected datasets (RTK leaf-on as example)
-cor_lon_rtk_deciduous <- stats::cor(training_data$lon_rtk_deciduous$predictors, method = 'pearson')
-cor_lon_rtk_coniferous <- stats::cor(training_data$lon_rtk_coniferous$predictors, method = 'pearson')
-corrplot::corrplot(cor_lon_rtk_deciduous, method = 'color', type = 'full',
+# correlation plots for selected datasets (leaf-on as example)
+cor_lon_all <- stats::cor(training_data$lon_all$predictors, method = 'pearson')
+cor_lon_deciduous <- stats::cor(training_data$lon_deciduous$predictors, method = 'pearson')
+cor_lon_coniferous <- stats::cor(training_data$lon_coniferous$predictors, method = 'pearson')
+corrplot::corrplot(cor_lon_all, method = 'color', type = 'full',
                    tl.col = 'black', tl.cex = 0.6, addCoef.col = NA,
-                   title = 'Correlation - leaf-on RTK deciduous')
-corrplot::corrplot(cor_lon_rtk_coniferous, method = 'color', type = 'full',
+                   title = 'Correlation - leaf-on all')
+corrplot::corrplot(cor_lon_deciduous, method = 'color', type = 'full',
                    tl.col = 'black', tl.cex = 0.6, addCoef.col = NA,
-                   title = 'Correlation - leaf-on RTK coniferous')
+                   title = 'Correlation - leaf-on deciduous')
+corrplot::corrplot(cor_lon_coniferous, method = 'color', type = 'full',
+                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA,
+                   title = 'Correlation - leaf-on coniferous')
 
 # train random forest models
 # implementing forward feature selection
-# for all forest inventory attributes across all datasets
-# datasets: 2 leaf conditions (lon, loff) x 2 RTK types (rtk, non_rtk) x 
-#           3 leaf types (all, deciduous, coniferous) = 12 datasets
-# total models: 6 responses x 12 datasets = 72 models
+# starting with biomass (agb_ha) as the only response variable
+# datasets: 2 leaf conditions (lon, loff) x
+#           3 leaf types (all, deciduous, coniferous) = 6 datasets
+# total models: 1 response x 6 datasets = 6 models
 
 # define response variables
 response_vars <- list(
-  list(name = 'total_vol_ha', col = 'total_vol_ha'),
-  list(name = 'merch_vol_ha', col = 'merch_vol_ha'),
-  list(name = 'agb_ha', col = 'agb_ha'),
-  list(name = 'tree_density', col = 'tree_density'),
-  list(name = 'basal_area_ha', col = 'basal_area_ha'),
-  list(name = 'dg', col = 'dg')
+  list(name = 'agb_ha', col = 'agb_ha')
+  # add further response variables later:
+  # list(name = 'total_vol_ha', col = 'total_vol_ha'),
+  # list(name = 'merch_vol_ha', col = 'merch_vol_ha'),
+  # list(name = 'tree_density', col = 'tree_density'),
+  # list(name = 'basal_area_ha', col = 'basal_area_ha'),
+  # list(name = 'dg', col = 'dg')
 )
 
 # dataset names for iteration
@@ -565,7 +528,7 @@ if (length(models_to_train) > 0) {
 
 
 
-# validation
+# 05: validation
 #-------------------------------------------------------------------------------
 
 # print summary of all trained models
@@ -633,14 +596,11 @@ for (resp in response_vars) {
   }
 }
 
-# compare RTK vs non-RTK model performance
-# for corresponding combinations (same leaf condition and leaf type)
-
 # get model names
-model_names <- names(cv_predictions)
+cv_model_names <- names(cv_predictions)
 
 # calculate validation metrics for all models
-results_list <- lapply(seq_along(cv_predictions), function(i) {
+metrics_per_model <- lapply(seq_along(cv_predictions), function(i) {
   
   pred_data <- cv_predictions[[i]]
   
@@ -655,6 +615,7 @@ results_list <- lapply(seq_along(cv_predictions), function(i) {
       n = dplyr::n(),
       RMSE = sqrt(mean(squared_error, na.rm = T)),
       mean_obs = mean(obs, na.rm = T),
+      R2 = 1 - sum(squared_error, na.rm = T) / sum((obs - mean(obs, na.rm = T))^2, na.rm = T),
       rel_RMSE = sqrt(mean(squared_error, na.rm = T)) / mean(obs, na.rm = T) * 100,
       MAE = mean(abs_error, na.rm = T),
       max_error = max(abs_error, na.rm = T),
@@ -663,31 +624,24 @@ results_list <- lapply(seq_along(cv_predictions), function(i) {
     ) %>%
     dplyr::mutate(
       model_id = i,
-      model_name = model_names[i]
+      model_name = cv_model_names[i]
     )
   
   return(summary_stats)
 })
 
 # combine all results
-all_results <- dplyr::bind_rows(results_list)
+model_metrics <- dplyr::bind_rows(metrics_per_model)
 
 # extract components from model_name
-# format: pred_{response}_{leaf_cond}_{positioning}_{leaf_type}
-all_results <- all_results %>%
-  
+# format: pred_{response}_{leaf_condition}_{leaf_type}
+model_metrics <- model_metrics %>%
+
   dplyr::mutate(
-    
+
     # extract response variable (everything between 'pred_' and '_lon_' or '_loff_')
     response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
-    
-    # extract positioning method (rtk vs non-rtk)
-    positioning = dplyr::case_when(
-      grepl('_non_rtk_', model_name) ~ 'non_rtk',
-      grepl('_rtk_', model_name) ~ 'rtk',
-      T ~ NA_character_
-    ),
-    
+
     # extract leaf condition (lon/loff)
     leaf_condition = dplyr::case_when(
       grepl('_lon_', model_name) ~ 'lon',
@@ -704,94 +658,23 @@ all_results <- all_results %>%
     )
   )
 
-# display full results table
-all_results %>%
+# assemble the final metrics table
+metrics_table <- model_metrics %>%
   dplyr::select(
-    response_var, positioning, leaf_condition, leaf_type,
-    n, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
-  dplyr::arrange(response_var, positioning, leaf_condition, leaf_type) %>%
+    response_var, leaf_condition, leaf_type,
+    n, R2, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
+  dplyr::arrange(response_var, leaf_condition, leaf_type)
+
+# display the table
+metrics_table %>%
   knitr::kable(digits = 2)
 
-# compare RTK vs non-RTK for corresponding combinations
-pos_comparison <- all_results %>%
-  dplyr::select(
-    response_var, positioning, leaf_condition, leaf_type,
-    n, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
-  tidyr::pivot_wider(
-    id_cols = c(response_var, leaf_condition, leaf_type),
-    names_from = positioning,
-    values_from = c(n, RMSE, rel_RMSE, MAE, bias, rel_bias),
-    names_glue = '{positioning}_{.value}'
-  ) %>%
-  dplyr::mutate(
-    # calculate differences (rtk - non-rtk)
-    diff_RMSE = rtk_RMSE - non_rtk_RMSE,
-    diff_rel_RMSE = rtk_rel_RMSE - non_rtk_rel_RMSE,
-    diff_MAE = rtk_MAE - non_rtk_MAE,
-    diff_bias = rtk_bias - non_rtk_bias,
-    diff_rel_bias = rtk_rel_bias - non_rtk_rel_bias,
-    # determine which is better (lower error = better)
-    better_positioning = ifelse(rtk_rel_RMSE < non_rtk_rel_RMSE, 'rtk', 'non_rtk'),
-    # relative improvement (%)
-    rel_improvement = (non_rtk_rel_RMSE - rtk_rel_RMSE) / non_rtk_rel_RMSE * 100
-  )
-
-# display RTK vs non-RTK comparison
-pos_comparison %>%
-  dplyr::select(response_var, leaf_condition, leaf_type, 
-                rtk_rel_RMSE, non_rtk_rel_RMSE, diff_rel_RMSE,
-                rtk_rel_bias, non_rtk_rel_bias, diff_rel_bias,
-                better_positioning, rel_improvement) %>%
-  dplyr::arrange(response_var, leaf_condition, leaf_type) %>%
-  knitr::kable(digits = 2)
-
-# summary: how often is RTK better than non-RTK?
-pos_summary <- pos_comparison %>%
-  dplyr::group_by(leaf_condition, leaf_type) %>%
-  dplyr::summarise(
-    n_comparisons = dplyr::n(),
-    n_rtk_better = sum(better_positioning == 'rtk'),
-    n_non_rtk_better = sum(better_positioning == 'non_rtk'),
-    pct_rtk_better = n_rtk_better / n_comparisons * 100,
-    mean_rel_improvement = mean(rel_improvement, na.rm = T),
-    .groups = 'drop'
-  )
-
-pos_summary %>%
-  knitr::kable(digits = 2)
-
-# summary by response variable
-pos_summary_by_response <- pos_comparison %>%
-  dplyr::group_by(response_var) %>%
-  dplyr::summarise(
-    n_comparisons = dplyr::n(),
-    n_rtk_better = sum(better_positioning == 'rtk'),
-    n_non_rtk_better = sum(better_positioning == 'non_rtk'),
-    pct_rtk_better = n_rtk_better / n_comparisons * 100,
-    mean_rtk_rel_RMSE = mean(rtk_rel_RMSE, na.rm = T),
-    mean_non_rtk_rel_RMSE = mean(non_rtk_rel_RMSE, na.rm = T),
-    mean_rel_improvement = mean(rel_improvement, na.rm = T),
-    .groups = 'drop'
-  )
-
-pos_summary_by_response %>%
-  knitr::kable(digits = 2)
-
-# overall summary
-overall_summary <- pos_comparison %>%
-  dplyr::summarise(
-    total_comparisons = dplyr::n(),
-    n_rtk_better = sum(better_positioning == 'rtk'),
-    n_non_rtk_better = sum(better_positioning == 'non_rtk'),
-    pct_rtk_better = n_rtk_better / total_comparisons * 100,
-    mean_rtk_rel_RMSE = mean(rtk_rel_RMSE, na.rm = T),
-    mean_non_rtk_rel_RMSE = mean(non_rtk_rel_RMSE, na.rm = T),
-    mean_rel_improvement = mean(rel_improvement, na.rm = T)
-  )
-
-message('\n--- Overall RTK vs non-RTK comparison ---')
-overall_summary %>%
-  knitr::kable(digits = 2)
+# store the table
+write.csv(
+  metrics_table,
+  file.path(output_dir, 'model_validation_metrics.csv'),
+  row.names = F
+)
 
 # define forest inventory attribute names (response variables)
 forest_inv_names <- c(
@@ -806,128 +689,30 @@ forest_inv_names <- c(
 # define order for forest inventory attributes
 forest_inv_order <- c('AGB', 'VOL_Tot', 'VOL_Merch', 'BA', 'QMD', 'TD')
 
-# prepare data for plotting
-data_visual <- all_results %>%
-  dplyr::mutate(
-    leaf_condition_label = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
-    response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order),
-    # rename and set order
-    leaf_type = factor(
-      dplyr::case_when(
-        leaf_type == 'all' ~ 'coniferous and deciduous combined (n = 170)',
-        leaf_type == 'deciduous' ~ 'deciduous (n = 139)',
-        leaf_type == 'coniferous' ~ 'coniferous (n = 31)'
-      ),
-      levels = c('coniferous and deciduous combined (n = 170)', 'deciduous (n = 139)', 'coniferous (n = 31)')
-    )
-  ) %>%
-  dplyr::group_by(response_var, response_var_label, positioning, leaf_type) %>%
-  dplyr::summarise(
-    mean_rel_RMSE = mean(rel_RMSE, na.rm = T),
-    lon_rel_RMSE = rel_RMSE[leaf_condition == 'lon'],
-    loff_rel_RMSE = rel_RMSE[leaf_condition == 'loff'],
-    min_rel_RMSE = min(rel_RMSE, na.rm = T),
-    max_rel_RMSE = max(rel_RMSE, na.rm = T),
-    # labels for error bar ends
-    min_label = ifelse(lon_rel_RMSE <= loff_rel_RMSE, 'leaf-on', 'leaf-off'),
-    max_label = ifelse(lon_rel_RMSE >= loff_rel_RMSE, 'leaf-on', 'leaf-off'),
-    .groups = 'drop'
-  )
+# define units for forest inventory attributes as plotmath snippets
+# (parsed into expressions for superscripts in the plot titles)
+forest_inv_units <- c(
+  'agb_ha'        = '"Mg" ~ "ha"^-1',
+  'total_vol_ha'  = '"m"^3 ~ "ha"^-1',
+  'merch_vol_ha'  = '"m"^3 ~ "ha"^-1',
+  'basal_area_ha' = '"m"^2 ~ "ha"^-1',
+  'dg'            = '"cm"',
+  'tree_density'  = '"n" ~ "ha"^-1'
+)
 
-# plot: rel RMSE by response variable, positioning (rtk/non-rtk) as bars
-# error bars show range between leaf-on and leaf-off
-# faceted by leaf type (all, deciduous, coniferous)
-ggplot(data_visual, aes(x = response_var_label, y = mean_rel_RMSE, fill = positioning)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-  geom_errorbar(aes(ymin = min_rel_RMSE, ymax = max_rel_RMSE),
-                position = position_dodge(width = 0.8), width = 0.25) +
-  geom_text(aes(y = max_rel_RMSE, label = max_label), 
-            position = position_dodge(width = 0.8), vjust = -0.5, size = 2.5) +
-  geom_text(aes(y = min_rel_RMSE, label = min_label), 
-            position = position_dodge(width = 0.8), vjust = 1.5, size = 2.5) +
-  facet_wrap(~ leaf_type, ncol = 3) +
-  scale_fill_manual(values = c('rtk' = '#606060', 'non_rtk' = '#B0B0B0'),
-                    labels = c('rtk' = 'RTK', 'non_rtk' = 'non-RTK')) +
-  labs(x = '', 
-       y = 'Relative RMSE (%)',
-       fill = 'Positioning') +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        strip.background = element_rect(fill = 'lightgrey'),
-        strip.text = element_text(face = 'bold'),
-        panel.grid.major.x = element_blank(),
-        panel.grid.minor = element_blank())
-
-# plot: same but separated by leaf condition 
-# (6 panels: 2 leaf conditions x 3 leaf types)
-ggplot(all_results %>% 
-         dplyr::mutate(leaf_condition_label = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
-                       response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order)), 
-       aes(x = response_var_label, y = rel_RMSE, fill = positioning)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-  facet_grid(leaf_condition_label ~ leaf_type) +
-  scale_fill_manual(values = c('rtk' = '#606060', 'non_rtk' = '#B0B0B0'),
-                    labels = c('rtk' = 'RTK', 'non_rtk' = 'non-RTK')) +
-  labs(x = '', 
-       y = 'Relative RMSE (%)',
-       fill = 'Positioning') +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        strip.background = element_rect(fill = 'lightgrey'),
-        strip.text = element_text(face = 'bold'))
-
-# plot: difference between RTK and non-RTK (improvement)
-ggplot(pos_comparison %>%
-         dplyr::mutate(
-           leaf_condition = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
-           response_var_label = factor(forest_inv_names[response_var], levels = forest_inv_order),
-           leaf_type = factor(
-             dplyr::case_when(
-               leaf_type == 'all' ~ 'coniferous and deciduous combined (n = 170)',
-               leaf_type == 'deciduous' ~ 'deciduous (n = 139)',
-               leaf_type == 'coniferous' ~ 'coniferous (n = 31)'
-             ),
-             levels = c('coniferous and deciduous combined (n = 170)', 'deciduous (n = 139)', 'coniferous (n = 31)')
-           )
-         ),  
-       aes(x = response_var_label, y = rel_improvement, fill = rel_improvement > 0)) +
-  geom_col(width = 0.7) +
-  geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey40') +
-  facet_grid(leaf_condition ~ leaf_type) +
-  scale_fill_manual(values = c('TRUE' = '#606060', 'FALSE' = '#B0B0B0'),
-                    labels = c('TRUE' = 'RTK better', 'FALSE' = 'non-RTK better'),
-                    name = '') +
-  labs(x = '', 
-       y = 'Relative Improvement (%)') +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        strip.background = element_rect(fill = 'lightgrey'),
-        strip.text = element_text(face = 'bold'),
-        panel.grid.major.x = element_blank(),
-        panel.grid.minor = element_blank())
-
-##########################################################
-
-# plot predicted vs. observed with CV predictions
-# combining RTK and non-RTK in one plot
-# 36 plots: 6 response vars x 2 leaf conditions x 3 leaf types
+# predicted vs. observed plots
 
 # combine all CV predictions into one data frame
-all_cv_predictions <- do.call(rbind, lapply(names(cv_predictions), function(name) {
+cv_predictions_df <- do.call(rbind, lapply(names(cv_predictions), function(name) {
   cv_predictions[[name]] %>%
     sf::st_drop_geometry() %>%
     dplyr::mutate(model_name = name)
 }))
 
 # extract components from model_name
-all_cv_predictions <- all_cv_predictions %>%
+cv_predictions_df <- cv_predictions_df %>%
   dplyr::mutate(
     response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
-    positioning = dplyr::case_when(
-      grepl('_non_rtk_', model_name) ~ 'non_rtk',
-      grepl('_rtk_', model_name) ~ 'rtk',
-      T ~ NA_character_
-    ),
     leaf_condition = dplyr::case_when(
       grepl('_lon_', model_name) ~ 'leaf-on',
       grepl('_loff_', model_name) ~ 'leaf-off',
@@ -942,12 +727,13 @@ all_cv_predictions <- all_cv_predictions %>%
   )
 
 # create one plot per response variable
-for (resp in unique(all_cv_predictions$response_var)) {
+for (resp in unique(cv_predictions_df$response_var)) {
   
-  plot_data_resp <- all_cv_predictions %>%
+  plot_data_resp <- cv_predictions_df %>%
     dplyr::filter(response_var == resp) %>%
     dplyr::mutate(
-      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous'))
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+      leaf_condition = factor(leaf_condition, levels = c('leaf-on', 'leaf-off'))
     )
   
   if (nrow(plot_data_resp) == 0) next
@@ -959,27 +745,39 @@ for (resp in unique(all_cv_predictions$response_var)) {
   axis_max <- max(c(plot_data_resp$obs, plot_data_resp$pred), na.rm = T)
   axis_min <- min(c(plot_data_resp$obs, plot_data_resp$pred), na.rm = T)
   
-  p <- ggplot(plot_data_resp, aes(x = obs, y = pred, color = positioning, shape = positioning)) +
+  # per-panel relative RMSE and R2 for annotation
+  panel_metrics <- plot_data_resp %>%
+    dplyr::group_by(leaf_condition, leaf_type) %>%
+    dplyr::summarise(
+      rel_RMSE = sqrt(mean((pred - obs)^2, na.rm = T)) / mean(obs, na.rm = T) * 100,
+      R2 = 1 - sum((pred - obs)^2, na.rm = T) / sum((obs - mean(obs, na.rm = T))^2, na.rm = T),
+      .groups = 'drop'
+    ) %>%
+    dplyr::mutate(label = paste0('rRMSE: ', round(rel_RMSE, 1), '%\n',
+                                 'R² = ', round(R2, 2)))
+
+  p <- ggplot(plot_data_resp, aes(x = pred, y = obs)) +
     geom_point(alpha = 0.7, size = 2) +
-    geom_abline(slope = 1, intercept = 0, linewidth = 1, color = 'red', linetype = 'dashed') +
-    geom_smooth(method = 'lm', se = F, linewidth = 1) +
+    geom_abline(slope = 1, intercept = 0, linewidth = 1,
+                color = 'red', linetype = 'dashed') +
+    geom_smooth(method = 'lm', se = F, linewidth = 1, color = 'black') +
+    geom_text(data = panel_metrics,
+              aes(x = axis_min + (axis_max - axis_min) * 0.05,
+                  y = axis_max - (axis_max - axis_min) * 0.05,
+                  label = label),
+              hjust = 0, vjust = 1, size = 3, inherit.aes = FALSE) +
     facet_grid(leaf_condition ~ leaf_type) +
     coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
-    scale_color_manual(values = c('rtk' = '#404040', 'non_rtk' = '#909090'),
-                       labels = c('rtk' = 'RTK', 'non_rtk' = 'non-RTK')) +
-    scale_shape_manual(values = c('rtk' = 16, 'non_rtk' = 17),
-                       labels = c('rtk' = 'RTK', 'non_rtk' = 'non-RTK')) +
-    labs(title = paste0('Predicted vs. Observed: ', forest_inv_label),
-         x = 'Observed', 
-         y = 'Predicted',
-         color = 'Positioning', 
-         shape = 'Positioning') +
+    labs(title = bquote('Predicted vs. Observed:' ~ .(forest_inv_label) ~
+                        '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
+         x = 'Predicted',
+         y = 'Observed') +
     theme_bw() +
     theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
-          legend.position = 'bottom',
           strip.background = element_rect(fill = 'lightgrey'),
-          strip.text = element_text(face = 'bold'))
-  
+          strip.text = element_text(face = 'bold'),
+          panel.grid = element_blank())
+
   print(p)
 }
 
@@ -992,7 +790,7 @@ for (resp in unique(all_cv_predictions$response_var)) {
 # using NNDM LOO CV results for RTK deciduous plots only
 
 # filter CV validation results for RTK deciduous
-lon_vs_loff <- all_results %>%
+lon_vs_loff <- model_metrics %>%
   dplyr::filter(positioning == 'rtk', leaf_type == 'deciduous') %>%
   dplyr::select(
     response_var, leaf_condition,
