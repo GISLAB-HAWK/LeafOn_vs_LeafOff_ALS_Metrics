@@ -526,6 +526,24 @@ if (length(models_to_train) > 0) {
   message('\n--- All models already exist, no training needed ---\n')
 }
 
+# overview of the variables selected by FFS for each model
+selected_features <- data.frame(
+  model      = names(ffs_models),
+  n_selected = sapply(ffs_models, function(m) length(m$selectedvars)),
+  variables   = sapply(ffs_models, function(m) paste(m$selectedvars, collapse = ', ')),
+  row.names  = NULL
+)
+
+selected_features %>%
+  knitr::kable(caption = 'Variables selected by FFS per model')
+
+# store the selected-variables overview
+write.csv(
+  selected_features,
+  file.path(output_dir, 'ffs_selected_variables.csv'),
+  row.names = F
+)
+
 
 
 # 05: validation
@@ -780,171 +798,6 @@ for (resp in unique(cv_predictions_df$response_var)) {
 
   print(p)
 }
-
-
-
-# 05: leaf-on vs leaf-off comparison (RTK deciduous)
-#-------------------------------------------------------------------------------
-
-# focus: compare leaf-on and leaf-off model performance
-# using NNDM LOO CV results for RTK deciduous plots only
-
-# filter CV validation results for RTK deciduous
-lon_vs_loff <- model_metrics %>%
-  dplyr::filter(positioning == 'rtk', leaf_type == 'deciduous') %>%
-  dplyr::select(
-    response_var, leaf_condition,
-    n, RMSE, rel_RMSE, MAE, bias, rel_bias
-  ) %>%
-  dplyr::arrange(response_var, leaf_condition)
-
-# display comparison table
-lon_vs_loff %>%
-  knitr::kable(digits = 2, caption = 'Leaf-on vs Leaf-off: RTK deciduous (NNDM LOO CV)')
-
-# pivot to wide format for direct side-by-side comparison
-lon_vs_loff_wide <- lon_vs_loff %>%
-  tidyr::pivot_wider(
-    id_cols = response_var,
-    names_from = leaf_condition,
-    values_from = c(n, RMSE, rel_RMSE, MAE, bias, rel_bias),
-    names_glue = '{leaf_condition}_{.value}'
-  ) %>%
-  dplyr::mutate(
-    diff_RMSE = lon_RMSE - loff_RMSE,
-    diff_rel_RMSE = lon_rel_RMSE - loff_rel_RMSE,
-    diff_MAE = lon_MAE - loff_MAE,
-    diff_bias = lon_bias - loff_bias,
-    diff_rel_bias = lon_rel_bias - loff_rel_bias,
-    better_season = ifelse(lon_rel_RMSE < loff_rel_RMSE, 'leaf-on', 'leaf-off'),
-    # relative improvement of better season over worse (%)
-    rel_improvement = abs(lon_rel_RMSE - loff_rel_RMSE) /
-      pmax(lon_rel_RMSE, loff_rel_RMSE) * 100
-  )
-
-# display wide comparison
-lon_vs_loff_wide %>%
-  dplyr::select(response_var,
-                lon_rel_RMSE, loff_rel_RMSE, diff_rel_RMSE,
-                lon_rel_bias, loff_rel_bias, diff_rel_bias,
-                better_season, rel_improvement) %>%
-  knitr::kable(digits = 2, caption = 'Leaf-on vs Leaf-off comparison: RTK deciduous')
-
-# plot: paired barplot of rel RMSE (leaf-on vs leaf-off) per response variable
-lon_vs_loff_plot_data <- lon_vs_loff %>%
-  dplyr::mutate(
-    response_var_label = factor(
-      forest_inv_names[response_var], levels = forest_inv_order
-    ),
-    leaf_condition_label = ifelse(
-      leaf_condition == 'lon', 'leaf-on', 'leaf-off'
-    )
-  )
-
-ggplot(lon_vs_loff_plot_data,
-       aes(x = response_var_label, y = rel_RMSE, fill = leaf_condition_label)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7,
-           color = 'black', linewidth = 0.4) +
-  geom_text(aes(label = round(rel_RMSE, 1)),
-            position = position_dodge(width = 0.8), vjust = -0.5, size = 3,
-            color = 'black', show.legend = F) +
-  scale_fill_manual(
-    values = c('leaf-on' = 'black', 'leaf-off' = 'white'),
-    name = ''
-  ) +
-  labs(x = '',
-       y = 'Relative RMSE (%)') +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
-        plot.title = element_text(face = 'bold'),
-        panel.grid = element_blank(),
-        legend.key.size = unit(1.2, 'cm'))
-
-# plot: paired barplot of rel bias
-ggplot(lon_vs_loff_plot_data,
-       aes(x = response_var_label, y = rel_bias, fill = leaf_condition_label)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7,
-           color = 'black', linewidth = 0.4) +
-  geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey40') +
-  geom_text(aes(label = round(rel_bias, 1),
-                vjust = ifelse(rel_bias >= 0, -0.5, 1.5)),
-            position = position_dodge(width = 0.8), size = 3,
-            color = 'black', show.legend = F) +
-  scale_fill_manual(
-    values = c('leaf-on' = 'black', 'leaf-off' = 'white'),
-    name = ''
-  ) +
-  labs(x = '',
-       y = 'Relative Bias (%)') +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
-        plot.title = element_text(face = 'bold'),
-        panel.grid = element_blank(),
-        legend.key.size = unit(1.2, 'cm'))
-
-
-# compare selected features between leaf-on and leaf-off models
-message('\n--- FFS selected features comparison (RTK deciduous) ---\n')
-for (resp in response_vars) {
-  
-  lon_model_name <- paste0('ffs_rf_', resp$name, '_lon_rtk_deciduous')
-  loff_model_name <- paste0('ffs_rf_', resp$name, '_loff_rtk_deciduous')
-  
-  lon_features <- if (lon_model_name %in% names(ffs_models)) {
-    ffs_models[[lon_model_name]]$selectedvars
-  } else {
-    NA
-  }
-  
-  loff_features <- if (loff_model_name %in% names(ffs_models)) {
-    ffs_models[[loff_model_name]]$selectedvars
-  } else {
-    NA
-  }
-  
-  message(paste0(resp$name, ':'))
-  message(paste0('  leaf-on:  ', paste(lon_features, collapse = ', ')))
-  message(paste0('  leaf-off: ', paste(loff_features, collapse = ', ')))
-  
-  if (!any(is.na(lon_features)) & !any(is.na(loff_features))) {
-    shared <- intersect(lon_features, loff_features)
-    lon_only <- setdiff(lon_features, loff_features)
-    loff_only <- setdiff(loff_features, lon_features)
-    message(paste0('  shared:     ', ifelse(length(shared) > 0, paste(shared, collapse = ', '), 'none')))
-    message(paste0('  lon only:   ', ifelse(length(lon_only) > 0, paste(lon_only, collapse = ', '), 'none')))
-    message(paste0('  loff only:  ', ifelse(length(loff_only) > 0, paste(loff_only, collapse = ', '), 'none')))
-  }
-  message('')
-}
-
-# create summary table of selected features
-ffs_features_comparison <- do.call(rbind, lapply(response_vars, function(resp) {
-  
-  lon_model_name <- paste0('ffs_rf_', resp$name, '_lon_rtk_deciduous')
-  loff_model_name <- paste0('ffs_rf_', resp$name, '_loff_rtk_deciduous')
-  
-  lon_features <- if (lon_model_name %in% names(ffs_models)) {
-    paste(ffs_models[[lon_model_name]]$selectedvars, collapse = ', ')
-  } else {
-    NA
-  }
-  
-  loff_features <- if (loff_model_name %in% names(ffs_models)) {
-    paste(ffs_models[[loff_model_name]]$selectedvars, collapse = ', ')
-  } else {
-    NA
-  }
-  
-  data.frame(
-    response = resp$name,
-    leaf_on_features = lon_features,
-    leaf_off_features = loff_features,
-    stringsAsFactors = F
-  )
-}))
-
-ffs_features_comparison %>%
-  knitr::kable(caption = 'FFS selected features: leaf-on vs leaf-off (RTK deciduous)')
 
 
 
