@@ -114,36 +114,145 @@ names(pc_loff_metrics)[names(pc_loff_metrics) == 'name'] <- 'kspnr'
 # 03: join calculated metrics with forest inventory data
 #-------------------------------------------------------------------------------
 
-# read forest inventory plots
-# (already clipped to the AOI and filtered)
-inv_attr_plots <- sf::st_read(
-  file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots.gpkg')
+# output paths for the joined plot metrics (leaf-on and leaf-off)
+plot_metrics_lon_file <- file.path(
+  processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg'
+)
+plot_metrics_loff_file <- file.path(
+  processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg'
 )
 
-# join metrics with inventory data
-inv_attr_plots_metrics_lon <- inv_attr_plots %>%
-  dplyr::left_join(
-    pc_lon_metrics %>% dplyr::mutate(kspnr = as.integer(kspnr)),
-    by = 'kspnr'
+if (file.exists(plot_metrics_lon_file) & file.exists(plot_metrics_loff_file)) {
+
+  # load existing joined plot metrics
+  cat('Loading existing joined plot metrics from disk...\n')
+  plot_metrics_lon <- sf::st_read(plot_metrics_lon_file, quiet = T)
+  plot_metrics_loff <- sf::st_read(plot_metrics_loff_file, quiet = T)
+
+} else {
+
+  cat('No joined plot metrics found, joining metrics with inventory data...\n')
+
+  # read forest inventory plots
+  # (already clipped to the AOI and filtered)
+  inv_attr_plots <- sf::st_read(
+    file.path(processed_data_dir, 'forest_inventory', 'inv_attr_plots.gpkg')
   )
 
-inv_attr_plots_metrics_loff <- inv_attr_plots %>%
-  dplyr::left_join(
-    pc_loff_metrics %>% dplyr::mutate(kspnr = as.integer(kspnr)),
-    by = 'kspnr'
-  )
+  # join metrics with inventory data
+  plot_metrics_lon <- inv_attr_plots %>%
+    dplyr::left_join(
+      pc_lon_metrics %>% dplyr::mutate(kspnr = as.integer(kspnr)),
+      by = 'kspnr'
+    )
 
-head(inv_attr_plots_metrics_lon)
-head(inv_attr_plots_metrics_loff)
+  plot_metrics_loff <- inv_attr_plots %>%
+    dplyr::left_join(
+      pc_loff_metrics %>% dplyr::mutate(kspnr = as.integer(kspnr)),
+      by = 'kspnr'
+    )
 
-# write to disk
-sf::st_write(
-  inv_attr_plots_metrics_lon,
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
+  # write to disk
+  sf::st_write(plot_metrics_lon, plot_metrics_lon_file, delete_dsn = T)
+  sf::st_write(plot_metrics_loff, plot_metrics_loff_file, delete_dsn = T)
+
+}
+
+head(plot_metrics_lon)
+head(plot_metrics_loff)
+
+
+
+# 04: correlation analysis of metrics with forest inventory attributes
+#-------------------------------------------------------------------------------
+
+# response variables (forest inventory attributes)
+response_vars <- c('agb_ha')
+# response_vars <- c('agb_ha', 'total_vol_ha', 'merch_vol_ha',
+#                    'tree_density', 'basal_area_ha', 'dg')
+
+# metric (predictor) columns
+metric_cols <- names(plot_metrics_lon)
+metric_cols <- metric_cols[
+  grepl('^BE_|^point_density$|^pulse_returns_mean$', metric_cols)
+]
+
+# leaf-on and leaf-off datasets (without geometry)
+metrics_data <- list(
+  lon = sf::st_drop_geometry(plot_metrics_lon),
+  loff = sf::st_drop_geometry(plot_metrics_loff)
 )
-sf::st_write(
-  inv_attr_plots_metrics_loff,
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
+
+# leaf types to analyse ('all' = deciduous and coniferous combined)
+leaf_types <- c('all', 'deciduous', 'coniferous')
+
+# compute Pearson correlations between each metric and each response variable,
+# separately for leaf-on/leaf-off and for all/deciduous/coniferous plots
+correlation_results <- do.call(rbind, lapply(names(metrics_data), function(leaf_condition) {
+
+  df_full <- metrics_data[[leaf_condition]]
+
+  do.call(rbind, lapply(leaf_types, function(lt) {
+
+    # subset by dominant leaf type ('all' keeps every plot)
+    df <- if (lt == 'all') df_full else df_full[df_full$dominant_leaf_type == lt, ]
+
+    do.call(rbind, lapply(response_vars, function(resp) {
+      data.frame(
+        leaf_condition = leaf_condition,
+        leaf_type = lt,
+        response_var = resp,
+        metric = metric_cols,
+        correlation = sapply(metric_cols, function(m) {
+          stats::cor(df[[m]], df[[resp]], use = 'complete.obs', method = 'pearson')
+        }),
+        row.names = NULL
+      )
+    }))
+  }))
+}))
+
+# display the correlation table (strongest correlations first)
+correlation_results %>%
+  dplyr::arrange(response_var, leaf_type, leaf_condition, dplyr::desc(abs(correlation))) %>%
+  knitr::kable(digits = 2)
+
+# store the correlation table
+write.csv(
+  correlation_results,
+  file.path(output_dir, 'metric_inventory_correlations.csv'),
+  row.names = F
+)
+
+# plot: leaf-on vs leaf-off correlation with AGB per metric,
+# faceted by leaf type (all / deciduous / coniferous)
+corr_agb <- correlation_results %>%
+  dplyr::filter(response_var == 'agb_ha') %>%
+  dplyr::mutate(
+    leaf_condition = ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
+    leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+    metric = factor(metric, levels = rev(metric_cols))
+  )
+
+corr_plot <- ggplot(corr_agb, aes(x = metric, y = correlation, fill = leaf_condition)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_hline(yintercept = 0, colour = 'grey40') +
+  facet_wrap(~ leaf_type, nrow = 1) +
+  scale_fill_manual(values = c('leaf-on' = '#009E73', 'leaf-off' = '#E69F00'),
+                    name = '') +
+  labs(x = '', y = 'Pearson correlation with AGB') +
+  coord_flip() +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+
+print(corr_plot)
+
+# save the plot
+ggplot2::ggsave(
+  filename = file.path(output_dir, 'metric_agb_correlations.pdf'),
+  plot = corr_plot,
+  width = 10,
+  height = 6
 )
 
 
