@@ -693,125 +693,100 @@ write.csv(
 # 05: validation
 #-------------------------------------------------------------------------------
 
-# print summary of all trained models
+# print summary of all trained models (ALS-only and ALS + species)
+all_trained_models <- c(ffs_models, ffs_models_species)
 message('\n--- Summary of all trained models ---\n')
-for (model_name in names(ffs_models)) {
+for (model_name in names(all_trained_models)) {
   message(paste0('\n', model_name, ':'))
-  print(CAST::global_validation(ffs_models[[model_name]]))
+  print(CAST::global_validation(all_trained_models[[model_name]]))
 }
 
-# extract cross-validation predictions from the trained models
-# create list to store all CV predictions
-cv_predictions <- list()
+# extract cross-validation predictions from a set of trained models
+# (cached to disk; file_tag keeps ALS and species predictions separate)
+extract_cv_predictions <- function(models, model_prefix, file_tag) {
 
-# loop over all combinations (response variable x dataset)
-for (resp in response_vars) {
-  for (dataset_name in dataset_names) {
-    
-    # create model name
-    model_name <- paste0('ffs_rf_', resp$name, '_', dataset_name)
-    pred_name <- paste0('pred_', resp$name, '_', dataset_name)
-    file_name <- paste0('pred_obsv_', resp$name, '_', dataset_name, '.gpkg')
-    file_path <- file.path(processed_data_dir, 'predictions', file_name)
-    
-    if (file.exists(file_path)) {
-      
-      # load existing CV predictions
-      message(paste0('Loading existing CV predictions: ', file_name))
-      cv_predictions[[pred_name]] <- sf::st_read(file_path, quiet = T)
-      
-    } else {
-      
-      # check if model exists
-      if (!model_name %in% names(ffs_models)) {
-        message(paste0('Model not found: ', model_name, ' - skipping'))
-        next
+  preds <- list()
+
+  for (resp in response_vars) {
+    for (dataset_name in dataset_names) {
+
+      model_name <- paste0(model_prefix, resp$name, '_', dataset_name)
+      pred_name  <- paste0('pred_', resp$name, '_', dataset_name)
+      file_name  <- paste0('pred_obsv_', file_tag, resp$name, '_', dataset_name, '.gpkg')
+      file_path  <- file.path(processed_data_dir, 'predictions', file_name)
+
+      if (file.exists(file_path)) {
+
+        message(paste0('Loading existing CV predictions: ', file_name))
+        preds[[pred_name]] <- sf::st_read(file_path, quiet = T)
+
+      } else {
+
+        if (!model_name %in% names(models)) {
+          message(paste0('Model not found: ', model_name, ' - skipping'))
+          next
+        }
+
+        model   <- models[[model_name]]
+        cv_pred <- model$pred
+
+        # link CV predictions to the original plot geometries
+        plot_data  <- training_data[[dataset_name]]$data
+        cv_pred_sf <- plot_data[cv_pred$rowIndex, ] %>%
+          dplyr::select(key, kspnr, abt) %>%
+          dplyr::mutate(pred = cv_pred$pred, obs = cv_pred$obs)
+
+        preds[[pred_name]] <- cv_pred_sf
+        sf::st_write(cv_pred_sf, file_path, delete_dsn = T)
+        message(paste0('CV predictions saved: ', file_name))
       }
-      
-      # get model and extract CV predictions
-      model <- ffs_models[[model_name]]
-      cv_pred <- model$pred
-      
-      # get plot data for linking geometries
-      plot_data <- training_data[[dataset_name]]$data
-      
-      # link to the original geometries (BI plots used for training)
-      cv_pred_sf <- plot_data[cv_pred$rowIndex, ] %>%
-        dplyr::select(key, kspnr, abt) %>%
-        dplyr::mutate(
-          pred = cv_pred$pred,
-          obs = cv_pred$obs
-        )
-      
-      # store spatial predictions
-      cv_predictions[[pred_name]] <- cv_pred_sf
-      
-      # save to file
-      sf::st_write(
-        cv_pred_sf,
-        file_path,
-        delete_dsn = T
-      )
-      
-      message(paste0('CV predictions saved: ', file_name))
     }
   }
+
+  preds
 }
 
-# get model names
-cv_model_names <- names(cv_predictions)
+# ALS-only predictions
+cv_predictions <- extract_cv_predictions(ffs_models, 'ffs_rf_', '')
 
-# calculate validation metrics for all models
-metrics_per_model <- lapply(seq_along(cv_predictions), function(i) {
-  
-  pred_data <- cv_predictions[[i]]
-  
-  # calculate squared error and absolute error
-  pred_data$squared_error <- (pred_data$pred - pred_data$obs)^2
-  pred_data$abs_error <- abs(pred_data$pred - pred_data$obs)
-  
-  # calculate summary statistics
-  summary_stats <- pred_data %>%
-    sf::st_drop_geometry() %>%
-    dplyr::summarise(
-      n = dplyr::n(),
-      RMSE = sqrt(mean(squared_error, na.rm = T)),
-      mean_obs = mean(obs, na.rm = T),
-      R2 = 1 - sum(squared_error, na.rm = T) / sum((obs - mean(obs, na.rm = T))^2, na.rm = T),
-      rel_RMSE = sqrt(mean(squared_error, na.rm = T)) / mean(obs, na.rm = T) * 100,
-      MAE = mean(abs_error, na.rm = T),
-      max_error = max(abs_error, na.rm = T),
-      bias = mean(pred - obs, na.rm = T),
-      rel_bias = mean(pred - obs, na.rm = T) / mean(obs, na.rm = T) * 100
-    ) %>%
-    dplyr::mutate(
-      model_id = i,
-      model_name = cv_model_names[i]
+# ALS + species predictions
+cv_predictions_species <- extract_cv_predictions(
+  ffs_models_species, 'ffs_rf_species_', 'species_'
+)
+
+# compute validation metrics for a set of CV predictions
+compute_cv_metrics <- function(cv_preds, predictor_set) {
+  do.call(rbind, lapply(names(cv_preds), function(nm) {
+    d  <- sf::st_drop_geometry(cv_preds[[nm]])
+    se <- (d$pred - d$obs)^2
+    ae <- abs(d$pred - d$obs)
+    data.frame(
+      predictor_set = predictor_set,
+      model_name    = nm,
+      n             = nrow(d),
+      RMSE          = sqrt(mean(se, na.rm = T)),
+      R2            = 1 - sum(se, na.rm = T) / sum((d$obs - mean(d$obs, na.rm = T))^2, na.rm = T),
+      rel_RMSE      = sqrt(mean(se, na.rm = T)) / mean(d$obs, na.rm = T) * 100,
+      MAE           = mean(ae, na.rm = T),
+      bias          = mean(d$pred - d$obs, na.rm = T),
+      rel_bias      = mean(d$pred - d$obs, na.rm = T) / mean(d$obs, na.rm = T) * 100,
+      row.names     = NULL
     )
-  
-  return(summary_stats)
-})
+  }))
+}
 
-# combine all results
-model_metrics <- dplyr::bind_rows(metrics_per_model)
-
-# extract components from model_name
-# format: pred_{response}_{leaf_condition}_{leaf_type}
-model_metrics <- model_metrics %>%
-
+# combine metrics of both predictor sets
+model_metrics <- dplyr::bind_rows(
+  compute_cv_metrics(cv_predictions, 'ALS'),
+  compute_cv_metrics(cv_predictions_species, 'ALS+species')
+) %>%
   dplyr::mutate(
-
-    # extract response variable (everything between 'pred_' and '_lon_' or '_loff_')
     response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
-
-    # extract leaf condition (lon/loff)
     leaf_condition = dplyr::case_when(
       grepl('_lon_', model_name) ~ 'lon',
       grepl('_loff_', model_name) ~ 'loff',
       T ~ NA_character_
     ),
-    
-    # extract leaf type (all/deciduous/coniferous)
     leaf_type = dplyr::case_when(
       grepl('_deciduous$', model_name) ~ 'deciduous',
       grepl('_coniferous$', model_name) ~ 'coniferous',
@@ -820,12 +795,11 @@ model_metrics <- model_metrics %>%
     )
   )
 
-# assemble the final metrics table
+# assemble the final metrics table (ALS vs. ALS+species side by side)
 metrics_table <- model_metrics %>%
-  dplyr::select(
-    response_var, leaf_condition, leaf_type,
-    n, R2, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
-  dplyr::arrange(response_var, leaf_condition, leaf_type)
+  dplyr::select(response_var, leaf_condition, leaf_type, predictor_set,
+                n, R2, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
+  dplyr::arrange(response_var, leaf_condition, leaf_type, predictor_set)
 
 # display the table
 metrics_table %>%
@@ -864,15 +838,15 @@ forest_inv_units <- c(
 
 # predicted vs. observed plots
 
-# combine all CV predictions into one data frame
-cv_predictions_df <- do.call(rbind, lapply(names(cv_predictions), function(name) {
-  cv_predictions[[name]] %>%
-    sf::st_drop_geometry() %>%
-    dplyr::mutate(model_name = name)
-}))
-
-# extract components from model_name
-cv_predictions_df <- cv_predictions_df %>%
+# combine CV predictions of both predictor sets into one data frame
+cv_predictions_df <- dplyr::bind_rows(
+  do.call(rbind, lapply(names(cv_predictions), function(nm)
+    cv_predictions[[nm]] %>% sf::st_drop_geometry() %>%
+      dplyr::mutate(model_name = nm, predictor_set = 'ALS'))),
+  do.call(rbind, lapply(names(cv_predictions_species), function(nm)
+    cv_predictions_species[[nm]] %>% sf::st_drop_geometry() %>%
+      dplyr::mutate(model_name = nm, predictor_set = 'ALS+species')))
+) %>%
   dplyr::mutate(
     response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
     leaf_condition = dplyr::case_when(
@@ -888,59 +862,66 @@ cv_predictions_df <- cv_predictions_df %>%
     )
   )
 
-# create one plot per response variable
+# one predicted vs. observed figure per response variable and predictor set
 for (resp in unique(cv_predictions_df$response_var)) {
-  
-  plot_data_resp <- cv_predictions_df %>%
-    dplyr::filter(response_var == resp) %>%
-    dplyr::mutate(
-      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
-      leaf_condition = factor(leaf_condition, levels = c('leaf-on', 'leaf-off'))
+  for (pset in c('ALS', 'ALS+species')) {
+
+    plot_data_resp <- cv_predictions_df %>%
+      dplyr::filter(response_var == resp, predictor_set == pset) %>%
+      dplyr::mutate(
+        leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+        leaf_condition = factor(leaf_condition, levels = c('leaf-on', 'leaf-off'))
+      )
+
+    if (nrow(plot_data_resp) == 0) next
+
+    forest_inv_label <- forest_inv_names[resp]
+    axis_max <- max(c(plot_data_resp$obs, plot_data_resp$pred), na.rm = T)
+    axis_min <- min(c(plot_data_resp$obs, plot_data_resp$pred), na.rm = T)
+
+    # per-panel relative RMSE and R2 for annotation
+    panel_metrics <- plot_data_resp %>%
+      dplyr::group_by(leaf_condition, leaf_type) %>%
+      dplyr::summarise(
+        rel_RMSE = sqrt(mean((pred - obs)^2, na.rm = T)) / mean(obs, na.rm = T) * 100,
+        R2 = 1 - sum((pred - obs)^2, na.rm = T) / sum((obs - mean(obs, na.rm = T))^2, na.rm = T),
+        .groups = 'drop'
+      ) %>%
+      dplyr::mutate(label = paste0('rRMSE: ', round(rel_RMSE, 1), '%\n',
+                                   'R² = ', round(R2, 2)))
+
+    p <- ggplot(plot_data_resp, aes(x = pred, y = obs)) +
+      geom_point(alpha = 0.7, size = 2) +
+      geom_abline(slope = 1, intercept = 0, linewidth = 1,
+                  color = 'red', linetype = 'dashed') +
+      geom_smooth(method = 'lm', se = F, linewidth = 1, color = 'black') +
+      geom_text(data = panel_metrics,
+                aes(x = axis_min + (axis_max - axis_min) * 0.05,
+                    y = axis_max - (axis_max - axis_min) * 0.05,
+                    label = label),
+                hjust = 0, vjust = 1, size = 3, inherit.aes = FALSE) +
+      facet_grid(leaf_condition ~ leaf_type) +
+      coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
+      labs(title = bquote('Predicted vs. Observed:' ~ .(forest_inv_label) ~
+                          '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
+           subtitle = pset,
+           x = 'Predicted',
+           y = 'Observed') +
+      theme_bw() +
+      theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+            plot.subtitle = element_text(hjust = 0.5),
+            strip.background = element_rect(fill = 'lightgrey'),
+            strip.text = element_text(face = 'bold'),
+            panel.grid = element_blank())
+
+    print(p)
+
+    ggplot2::ggsave(
+      filename = file.path(output_dir,
+        paste0('pred_obs_', resp, '_', gsub('[^A-Za-z]', '', pset), '.pdf')),
+      plot = p, width = 10, height = 8
     )
-  
-  if (nrow(plot_data_resp) == 0) next
-  
-  # get forest inventory attribute name for response variable
-  forest_inv_label <- forest_inv_names[resp]
-  
-  # calculate axis limits for equal scales
-  axis_max <- max(c(plot_data_resp$obs, plot_data_resp$pred), na.rm = T)
-  axis_min <- min(c(plot_data_resp$obs, plot_data_resp$pred), na.rm = T)
-  
-  # per-panel relative RMSE and R2 for annotation
-  panel_metrics <- plot_data_resp %>%
-    dplyr::group_by(leaf_condition, leaf_type) %>%
-    dplyr::summarise(
-      rel_RMSE = sqrt(mean((pred - obs)^2, na.rm = T)) / mean(obs, na.rm = T) * 100,
-      R2 = 1 - sum((pred - obs)^2, na.rm = T) / sum((obs - mean(obs, na.rm = T))^2, na.rm = T),
-      .groups = 'drop'
-    ) %>%
-    dplyr::mutate(label = paste0('rRMSE: ', round(rel_RMSE, 1), '%\n',
-                                 'R² = ', round(R2, 2)))
-
-  p <- ggplot(plot_data_resp, aes(x = pred, y = obs)) +
-    geom_point(alpha = 0.7, size = 2) +
-    geom_abline(slope = 1, intercept = 0, linewidth = 1,
-                color = 'red', linetype = 'dashed') +
-    geom_smooth(method = 'lm', se = F, linewidth = 1, color = 'black') +
-    geom_text(data = panel_metrics,
-              aes(x = axis_min + (axis_max - axis_min) * 0.05,
-                  y = axis_max - (axis_max - axis_min) * 0.05,
-                  label = label),
-              hjust = 0, vjust = 1, size = 3, inherit.aes = FALSE) +
-    facet_grid(leaf_condition ~ leaf_type) +
-    coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
-    labs(title = bquote('Predicted vs. Observed:' ~ .(forest_inv_label) ~
-                        '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
-         x = 'Predicted',
-         y = 'Observed') +
-    theme_bw() +
-    theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
-          strip.background = element_rect(fill = 'lightgrey'),
-          strip.text = element_text(face = 'bold'),
-          panel.grid = element_blank())
-
-  print(p)
+  }
 }
 
 
