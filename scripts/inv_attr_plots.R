@@ -407,7 +407,8 @@ bi_points_trees <- bi_points_trees %>%
 inv_attr_plots <- unique(
   bi_points_trees[,c(
     'key', 'kspnr', 'abt', 'rw', 'hw', 'total_vol_ha', 'merch_vol_ha',
-    'agb_ha', 'tree_density', 'basal_area_ha', 'dg', 'dominant_leaf_type'
+    'agb_ha', 'tree_density', 'basal_area_ha', 'dg', 
+    'total_deciduous', 'total_coniferous', 'dominant_leaf_type'
     )]
   )
 
