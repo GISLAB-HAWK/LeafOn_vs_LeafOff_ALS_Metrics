@@ -237,7 +237,7 @@ data_df_list <- list(
 )
 
 # function to fit RF models with different CV methods
-fit_cv_models <- function(data_df, nndm_result, predictor_start_col = 17) {
+fit_cv_models <- function(data_df, nndm_result, predictor_start_col = 19) {
   
   # LOO CV
   loo_ctrl <- caret::trainControl(method = 'LOOCV', savePredictions = T)
@@ -328,7 +328,7 @@ cv_validation_results |>
 
 # define all training datasets
 # structure: list with data, predictors, and matching pixel centroids
-predictor_start_col <- 17
+predictor_start_col <- 19
 
 training_data <- list(
   # leaf-on datasets
@@ -545,6 +545,146 @@ selected_features %>%
 write.csv(
   selected_features,
   file.path(output_dir, 'ffs_selected_variables.csv'),
+  row.names = F
+)
+
+
+
+# 04b: model training with additional species-composition predictors
+#-------------------------------------------------------------------------------
+
+# same workflow as part 04, but the ALS metrics are complemented by the
+# field-derived main-canopy basal area of deciduous vs. coniferous trees
+# (total_deciduous, total_coniferous)
+
+# additional (species-composition) predictors
+extra_predictors <- c('total_deciduous', 'total_coniferous')
+
+# extend each dataset's predictor set with the two species variables
+# (NNDM folds / train_controls / tgrid / response_vars are reused unchanged)
+training_data_species <- lapply(training_data, function(d) {
+  extra <- sf::st_drop_geometry(d$data)[, extra_predictors, drop = FALSE]
+  d$predictors <- cbind(d$predictors, extra)
+  d
+})
+
+# create list to store the extended models
+ffs_models_species <- list()
+
+# check which extended models already exist
+models_to_train_species <- list()
+for (resp in response_vars) {
+  for (dataset_name in dataset_names) {
+
+    model_name <- paste0('ffs_rf_species_', resp$name, '_', dataset_name)
+    file_name  <- paste0('ffs_rf_species_', resp$name, '_', dataset_name, '.RDS')
+    file_path  <- file.path(processed_data_dir, 'models', file_name)
+
+    if (file.exists(file_path)) {
+      message(paste0('Loading existing model: ', file_name))
+      ffs_models_species[[model_name]] <- readRDS(file_path)
+    } else {
+      models_to_train_species[[model_name]] <- list(
+        resp = resp, dataset_name = dataset_name, file_name = file_name
+      )
+    }
+  }
+}
+
+message(paste0('\n--- Extended models to train: ', length(models_to_train_species), ' ---\n'))
+
+# train only extended models that don't exist yet
+if (length(models_to_train_species) > 0) {
+
+  n_cores <- parallel::detectCores() - 2
+  cl <- parallel::makeCluster(n_cores)
+  doParallel::registerDoParallel(cl)
+
+  for (model_name in names(models_to_train_species)) {
+
+    model_info   <- models_to_train_species[[model_name]]
+    resp         <- model_info$resp
+    dataset_name <- model_info$dataset_name
+    file_name    <- model_info$file_name
+
+    message(paste0('\n--- Training model: ', model_name, ' ---\n'))
+
+    predictors    <- training_data_species[[dataset_name]]$predictors
+    response_data <- training_data_species[[dataset_name]]$data
+    ctrl          <- train_controls[[dataset_name]]
+    response      <- sf::st_drop_geometry(response_data[[resp$col]])
+
+    ffs_model <- CAST::ffs(
+      predictors,
+      response,
+      method = 'ranger',
+      trControl = ctrl,
+      tuneGrid = tgrid,
+      num.trees = 100,
+      importance = 'permutation',
+      seed = 999
+    )
+
+    ffs_models_species[[model_name]] <- ffs_model
+    saveRDS(ffs_model, file.path(processed_data_dir, 'models', file_name))
+    message(paste0('Model saved: ', file_name))
+  }
+
+  parallel::stopCluster(cl)
+
+} else {
+  message('\n--- All extended models already exist, no training needed ---\n')
+}
+
+# variables selected by FFS for the extended models
+selected_features_species <- data.frame(
+  model      = names(ffs_models_species),
+  n_selected = sapply(ffs_models_species, function(m) length(m$selectedvars)),
+  variables  = sapply(ffs_models_species, function(m) paste(m$selectedvars, collapse = ', ')),
+  row.names  = NULL
+)
+
+selected_features_species %>%
+  knitr::kable(caption = 'Variables selected by FFS per model (ALS + species)')
+
+write.csv(
+  selected_features_species,
+  file.path(output_dir, 'ffs_selected_variables_species.csv'),
+  row.names = F
+)
+
+# compare ALS-only (part 04) vs. ALS + species (part 04b)
+# using the global NNDM LOO CV performance of each model
+gv_table <- function(models, predictor_set) {
+  do.call(rbind, lapply(names(models), function(mn) {
+    gv <- CAST::global_validation(models[[mn]])
+    data.frame(
+      key           = sub('^ffs_rf_(species_)?', '', mn),
+      predictor_set = predictor_set,
+      RMSE          = gv[['RMSE']],
+      R2            = gv[['Rsquared']],
+      row.names     = NULL
+    )
+  }))
+}
+
+model_comparison <- dplyr::bind_rows(
+  gv_table(ffs_models, 'ALS'),
+  gv_table(ffs_models_species, 'ALS_species')
+) %>%
+  tidyr::pivot_wider(names_from = predictor_set, values_from = c(RMSE, R2)) %>%
+  dplyr::mutate(
+    delta_RMSE = RMSE_ALS_species - RMSE_ALS,
+    delta_R2   = R2_ALS_species - R2_ALS
+  )
+
+model_comparison %>%
+  knitr::kable(digits = 2,
+               caption = 'ALS vs. ALS + species (NNDM LOO CV, global validation)')
+
+write.csv(
+  model_comparison,
+  file.path(output_dir, 'model_comparison_als_vs_species.csv'),
   row.names = F
 )
 
