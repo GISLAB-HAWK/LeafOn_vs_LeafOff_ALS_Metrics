@@ -550,67 +550,66 @@ write.csv(
 
 
 
-# 04b: model training with additional species-composition predictors
+# 04b: model training with additional tree-type-share predictors
 #-------------------------------------------------------------------------------
 
 # same workflow as part 04, but the ALS metrics are complemented by the
-# field-derived main-canopy basal area of deciduous vs. coniferous trees
-# (total_deciduous, total_coniferous)
+# deciduous and coniferous basal-area shares (main canopy, percent 0-100).
 
-# additional (species-composition) predictors
-extra_predictors <- c('total_deciduous', 'total_coniferous')
+# additional (tree-type-share) predictors
+extra_predictors <- c('deciduous_share', 'coniferous_share')
 
-# extend each dataset's predictor set with the two species variables
+# extend each dataset's predictor set with the two species_share variables
 # (NNDM folds / train_controls / tgrid / response_vars are reused unchanged)
-training_data_species <- lapply(training_data, function(d) {
+training_data_species_share <- lapply(training_data, function(d) {
   extra <- sf::st_drop_geometry(d$data)[, extra_predictors, drop = FALSE]
   d$predictors <- cbind(d$predictors, extra)
   d
 })
 
 # create list to store the extended models
-ffs_models_species <- list()
+ffs_models_species_share <- list()
 
 # check which extended models already exist
-models_to_train_species <- list()
+models_to_train_species_share <- list()
 for (resp in response_vars) {
   for (dataset_name in dataset_names) {
 
-    model_name <- paste0('ffs_rf_species_', resp$name, '_', dataset_name)
-    file_name  <- paste0('ffs_rf_species_', resp$name, '_', dataset_name, '.RDS')
+    model_name <- paste0('ffs_rf_species_share_', resp$name, '_', dataset_name)
+    file_name  <- paste0('ffs_rf_species_share_', resp$name, '_', dataset_name, '.RDS')
     file_path  <- file.path(processed_data_dir, 'models', file_name)
 
     if (file.exists(file_path)) {
       message(paste0('Loading existing model: ', file_name))
-      ffs_models_species[[model_name]] <- readRDS(file_path)
+      ffs_models_species_share[[model_name]] <- readRDS(file_path)
     } else {
-      models_to_train_species[[model_name]] <- list(
+      models_to_train_species_share[[model_name]] <- list(
         resp = resp, dataset_name = dataset_name, file_name = file_name
       )
     }
   }
 }
 
-message(paste0('\n--- Extended models to train: ', length(models_to_train_species), ' ---\n'))
+message(paste0('\n--- Extended models to train: ', length(models_to_train_species_share), ' ---\n'))
 
 # train only extended models that don't exist yet
-if (length(models_to_train_species) > 0) {
+if (length(models_to_train_species_share) > 0) {
 
   n_cores <- parallel::detectCores() - 2
   cl <- parallel::makeCluster(n_cores)
   doParallel::registerDoParallel(cl)
 
-  for (model_name in names(models_to_train_species)) {
+  for (model_name in names(models_to_train_species_share)) {
 
-    model_info   <- models_to_train_species[[model_name]]
+    model_info   <- models_to_train_species_share[[model_name]]
     resp         <- model_info$resp
     dataset_name <- model_info$dataset_name
     file_name    <- model_info$file_name
 
     message(paste0('\n--- Training model: ', model_name, ' ---\n'))
 
-    predictors    <- training_data_species[[dataset_name]]$predictors
-    response_data <- training_data_species[[dataset_name]]$data
+    predictors    <- training_data_species_share[[dataset_name]]$predictors
+    response_data <- training_data_species_share[[dataset_name]]$data
     ctrl          <- train_controls[[dataset_name]]
     response      <- sf::st_drop_geometry(response_data[[resp$col]])
 
@@ -625,7 +624,7 @@ if (length(models_to_train_species) > 0) {
       seed = 999
     )
 
-    ffs_models_species[[model_name]] <- ffs_model
+    ffs_models_species_share[[model_name]] <- ffs_model
     saveRDS(ffs_model, file.path(processed_data_dir, 'models', file_name))
     message(paste0('Model saved: ', file_name))
   }
@@ -637,29 +636,29 @@ if (length(models_to_train_species) > 0) {
 }
 
 # variables selected by FFS for the extended models
-selected_features_species <- data.frame(
-  model      = names(ffs_models_species),
-  n_selected = sapply(ffs_models_species, function(m) length(m$selectedvars)),
-  variables  = sapply(ffs_models_species, function(m) paste(m$selectedvars, collapse = ', ')),
+selected_features_species_share <- data.frame(
+  model      = names(ffs_models_species_share),
+  n_selected = sapply(ffs_models_species_share, function(m) length(m$selectedvars)),
+  variables  = sapply(ffs_models_species_share, function(m) paste(m$selectedvars, collapse = ', ')),
   row.names  = NULL
 )
 
-selected_features_species %>%
-  knitr::kable(caption = 'Variables selected by FFS per model (ALS + species)')
+selected_features_species_share %>%
+  knitr::kable(caption = 'Variables selected by FFS per model (ALS + species_share)')
 
 write.csv(
-  selected_features_species,
-  file.path(output_dir, 'ffs_selected_variables_species.csv'),
+  selected_features_species_share,
+  file.path(output_dir, 'ffs_selected_variables_species_share.csv'),
   row.names = F
 )
 
-# compare ALS-only (part 04) vs. ALS + species (part 04b)
+# compare ALS-only (part 04) vs. ALS + species_share (part 04b)
 # using the global NNDM LOO CV performance of each model
 gv_table <- function(models, predictor_set) {
   do.call(rbind, lapply(names(models), function(mn) {
     gv <- CAST::global_validation(models[[mn]])
     data.frame(
-      key           = sub('^ffs_rf_(species_)?', '', mn),
+      key           = sub('^ffs_rf_(species_share_)?', '', mn),
       predictor_set = predictor_set,
       RMSE          = gv[['RMSE']],
       R2            = gv[['Rsquared']],
@@ -670,21 +669,21 @@ gv_table <- function(models, predictor_set) {
 
 model_comparison <- dplyr::bind_rows(
   gv_table(ffs_models, 'ALS'),
-  gv_table(ffs_models_species, 'ALS_species')
+  gv_table(ffs_models_species_share, 'ALS_species_share')
 ) %>%
   tidyr::pivot_wider(names_from = predictor_set, values_from = c(RMSE, R2)) %>%
   dplyr::mutate(
-    delta_RMSE = RMSE_ALS_species - RMSE_ALS,
-    delta_R2   = R2_ALS_species - R2_ALS
+    delta_RMSE = RMSE_ALS_species_share - RMSE_ALS,
+    delta_R2   = R2_ALS_species_share - R2_ALS
   )
 
 model_comparison %>%
   knitr::kable(digits = 2,
-               caption = 'ALS vs. ALS + species (NNDM LOO CV, global validation)')
+               caption = 'ALS vs. ALS + species_share (NNDM LOO CV, global validation)')
 
 write.csv(
   model_comparison,
-  file.path(output_dir, 'model_comparison_als_vs_species.csv'),
+  file.path(output_dir, 'model_comparison_als_vs_species_share.csv'),
   row.names = F
 )
 
@@ -693,8 +692,8 @@ write.csv(
 # 05: validation
 #-------------------------------------------------------------------------------
 
-# print summary of all trained models (ALS-only and ALS + species)
-all_trained_models <- c(ffs_models, ffs_models_species)
+# print summary of all trained models (ALS-only and ALS + species_share)
+all_trained_models <- c(ffs_models, ffs_models_species_share)
 message('\n--- Summary of all trained models ---\n')
 for (model_name in names(all_trained_models)) {
   message(paste0('\n', model_name, ':'))
@@ -702,7 +701,7 @@ for (model_name in names(all_trained_models)) {
 }
 
 # extract cross-validation predictions from a set of trained models
-# (cached to disk; file_tag keeps ALS and species predictions separate)
+# (cached to disk; file_tag keeps ALS and species_share predictions separate)
 extract_cv_predictions <- function(models, model_prefix, file_tag) {
 
   preds <- list()
@@ -749,9 +748,9 @@ extract_cv_predictions <- function(models, model_prefix, file_tag) {
 # ALS-only predictions
 cv_predictions <- extract_cv_predictions(ffs_models, 'ffs_rf_', '')
 
-# ALS + species predictions
-cv_predictions_species <- extract_cv_predictions(
-  ffs_models_species, 'ffs_rf_species_', 'species_'
+# ALS + species_share predictions
+cv_predictions_species_share <- extract_cv_predictions(
+  ffs_models_species_share, 'ffs_rf_species_share_', 'species_share_'
 )
 
 # compute validation metrics for a set of CV predictions
@@ -778,7 +777,7 @@ compute_cv_metrics <- function(cv_preds, predictor_set) {
 # combine metrics of both predictor sets
 model_metrics <- dplyr::bind_rows(
   compute_cv_metrics(cv_predictions, 'ALS'),
-  compute_cv_metrics(cv_predictions_species, 'ALS+species')
+  compute_cv_metrics(cv_predictions_species_share, 'ALS+species_share')
 ) %>%
   dplyr::mutate(
     response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
@@ -795,7 +794,7 @@ model_metrics <- dplyr::bind_rows(
     )
   )
 
-# assemble the final metrics table (ALS vs. ALS+species side by side)
+# assemble the final metrics table (ALS vs. ALS+species_share side by side)
 metrics_table <- model_metrics %>%
   dplyr::select(response_var, leaf_condition, leaf_type, predictor_set,
                 n, R2, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
@@ -843,9 +842,9 @@ cv_predictions_df <- dplyr::bind_rows(
   do.call(rbind, lapply(names(cv_predictions), function(nm)
     cv_predictions[[nm]] %>% sf::st_drop_geometry() %>%
       dplyr::mutate(model_name = nm, predictor_set = 'ALS'))),
-  do.call(rbind, lapply(names(cv_predictions_species), function(nm)
-    cv_predictions_species[[nm]] %>% sf::st_drop_geometry() %>%
-      dplyr::mutate(model_name = nm, predictor_set = 'ALS+species')))
+  do.call(rbind, lapply(names(cv_predictions_species_share), function(nm)
+    cv_predictions_species_share[[nm]] %>% sf::st_drop_geometry() %>%
+      dplyr::mutate(model_name = nm, predictor_set = 'ALS+species_share')))
 ) %>%
   dplyr::mutate(
     response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
@@ -864,7 +863,7 @@ cv_predictions_df <- dplyr::bind_rows(
 
 # one predicted vs. observed figure per response variable and predictor set
 for (resp in unique(cv_predictions_df$response_var)) {
-  for (pset in c('ALS', 'ALS+species')) {
+  for (pset in c('ALS', 'ALS+species_share')) {
 
     plot_data_resp <- cv_predictions_df %>%
       dplyr::filter(response_var == resp, predictor_set == pset) %>%
