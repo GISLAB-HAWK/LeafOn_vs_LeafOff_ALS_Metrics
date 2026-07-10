@@ -396,6 +396,14 @@ bi_points_trees <- bi_points_trees %>%
     total_coniferous = sum(dplyr::if_else(
       leaf_type == 'coniferous' & bestschicht %in% c(1, 4),
       basal_area_tree * nha, 0, missing = 0), na.rm = T),
+    # basal-area share of deciduous vs. coniferous trees (main canopy),
+    # in percent (0-100)
+    deciduous_share = dplyr::if_else(
+      (total_deciduous + total_coniferous) > 0,
+      total_deciduous / (total_deciduous + total_coniferous) * 100, 0),
+    coniferous_share = dplyr::if_else(
+      (total_deciduous + total_coniferous) > 0,
+      total_coniferous / (total_deciduous + total_coniferous) * 100, 0),
     dominant_leaf_type = dplyr::case_when(
       total_deciduous > total_coniferous ~ 'deciduous',
       total_coniferous > total_deciduous ~ 'coniferous',
@@ -407,8 +415,8 @@ bi_points_trees <- bi_points_trees %>%
 inv_attr_plots <- unique(
   bi_points_trees[,c(
     'key', 'kspnr', 'abt', 'rw', 'hw', 'total_vol_ha', 'merch_vol_ha',
-    'agb_ha', 'tree_density', 'basal_area_ha', 'dg', 
-    'total_deciduous', 'total_coniferous', 'dominant_leaf_type'
+    'agb_ha', 'tree_density', 'basal_area_ha', 'dg',
+    'deciduous_share', 'coniferous_share', 'dominant_leaf_type'
     )]
   )
 
