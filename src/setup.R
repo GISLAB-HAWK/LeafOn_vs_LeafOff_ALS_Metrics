@@ -21,14 +21,15 @@ if (!file.exists(paste('data')) |
        (!file.exists(paste('data/raw_data/pc_leafon_2023')) ||
         (!file.exists(paste('data/processed_data')) |
          (!file.exists(paste('data/processed_data/forest_inventory')) |
-          (!file.exists(paste('data/processed_data/chm_leafoff_2024')) |
-           (!file.exists(paste('data/processed_data/chm_leafon_2023')) |
-            (!file.exists(paste('data/processed_data/metrics')) |
-             (!file.exists(paste('data/processed_data/train_test_ds')) |
-              (!file.exists(paste('data/processed_data/models')) |
-               (!file.exists(paste('data/processed_data/predictions')) |
-                (!file.exists(paste('data/metadata'))
-                ))))))))))))))
+          (!file.exists(paste('data/processed_data/chm_leafoff')) |
+           (!file.exists(paste('data/processed_data/chm_leafon')) |
+            (!file.exists(paste('data/processed_data/gap_polygons_leafoff')) |
+             (!file.exists(paste('data/processed_data/gap_polygons_leafon')) |
+              (!file.exists(paste('data/processed_data/metrics')) |
+               (!file.exists(paste('data/processed_data/models')) |
+                (!file.exists(paste('data/processed_data/predictions')) |
+                 (!file.exists(paste('data/metadata'))
+                  )))))))))))))))
   {
   
   dir.create('data')
@@ -38,10 +39,11 @@ if (!file.exists(paste('data')) |
   dir.create('data/raw_data/pc_leafon_2023')
   dir.create('data/processed_data')
   dir.create('data/processed_data/forest_inventory')
-  dir.create('data/processed_data/chm_leafoff_2024')
-  dir.create('data/processed_data/chm_leafon_2023')
+  dir.create('data/processed_data/chm_leafoff')
+  dir.create('data/processed_data/chm_leafon')
+  dir.create('data/processed_data/gap_polygons_leafoff')
+  dir.create('data/processed_data/gap_polygons_leafon')
   dir.create('data/processed_data/metrics')
-  dir.create('data/processed_data/train_test_ds')
   dir.create('data/processed_data/models')
   dir.create('data/processed_data/predictions')
   dir.create('data/metadata')
