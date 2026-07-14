@@ -84,13 +84,28 @@ run_spikefree_chm <- function(laz_files, out_dir, label) {
 run_spikefree_chm(laz_files_2023, chm_dir_2023, 'leaf-on (2023)')
 run_spikefree_chm(laz_files_2024, chm_dir_2024, 'leaf-off (2024)')
 
-# read the CHM tiles back as virtual mosaics and take a quick look
-chm_lon  <- terra::vrt(list.files(chm_dir_2023, pattern = '\\.tif$', full.names = TRUE))
-chm_loff <- terra::vrt(list.files(chm_dir_2024, pattern = '\\.tif$', full.names = TRUE))
+# build a virtual mosaic (VRT) from the single CHM tiles,
+# or load it if it already exists
+chm_lon_mosaic_file  <- file.path(chm_dir_2023, 'chm_leafon_2023.vrt')
+chm_loff_mosaic_file <- file.path(chm_dir_2024, 'chm_leafoff_2024.vrt')
 
+load_or_build_chm_mosaic <- function(tile_dir, mosaic_file) {
+  if (file.exists(mosaic_file)) {
+    cat('Loading existing CHM mosaic:', basename(mosaic_file), '\n')
+    return(terra::rast(mosaic_file))
+  }
+  cat('Building CHM mosaic:', basename(mosaic_file), '\n')
+  tiles <- list.files(tile_dir, pattern = '\\.tif$', full.names = T)
+  terra::vrt(tiles, filename = mosaic_file, overwrite = T)
+}
+
+chm_lon  <- load_or_build_chm_mosaic(chm_dir_2023, chm_lon_mosaic_file)
+chm_loff <- load_or_build_chm_mosaic(chm_dir_2024, chm_loff_mosaic_file)
+
+# quick look
 par(mfrow = c(1, 2))
-terra::plot(chm_lon,  main = 'leaf-on 2023 (spike-free CHM)')
-terra::plot(chm_loff, main = 'leaf-off 2024 (spike-free CHM)')
+terra::plot(chm_lon,  main = 'leaf-on 2023')
+terra::plot(chm_loff, main = 'leaf-off 2024')
 par(mfrow = c(1, 1))
 
 
