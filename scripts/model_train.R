@@ -377,6 +377,15 @@ training_data <- list(
   )
 )
 
+# gap_fraction is appended as the last column of the plot metrics and therefore
+# falls inside the predictor_start_col:ncol() range. Drop it from the base ALS
+# predictor set so parts 04 / 04b stay pure ALS and it is only added explicitly
+# in part 04c.
+training_data <- lapply(training_data, function(d) {
+  d$predictors <- d$predictors[, setdiff(names(d$predictors), 'gap_fraction'), drop = FALSE]
+  d
+})
+
 # initialize NNDM for all datasets
 message('Initializing NNDM for all datasets...')
 nndm_results <- lapply(names(training_data), function(name) {
@@ -684,6 +693,145 @@ model_comparison %>%
 write.csv(
   model_comparison,
   file.path(output_dir, 'model_comparison_als_vs_species_share.csv'),
+  row.names = F
+)
+
+
+
+# 04c: model training with the gap fraction as additional predictor
+#-------------------------------------------------------------------------------
+
+# same workflow as part 04, but the ALS metrics are complemented by the
+# canopy gap fraction per plot (percent 0-100); no tree-type shares here.
+
+# additional (gap fraction) predictor
+extra_predictors_gap <- c('gap_fraction')
+
+# extend each dataset's predictor set with the gap fraction variable
+# (NNDM folds / train_controls / tgrid / response_vars are reused unchanged)
+training_data_gap <- lapply(training_data, function(d) {
+  extra <- sf::st_drop_geometry(d$data)[, extra_predictors_gap, drop = FALSE]
+  d$predictors <- cbind(d$predictors, extra)
+  d
+})
+
+# create list to store the gap-fraction models
+ffs_models_gap <- list()
+
+# check which gap-fraction models already exist
+models_to_train_gap <- list()
+for (resp in response_vars) {
+  for (dataset_name in dataset_names) {
+
+    model_name <- paste0('ffs_rf_gaps_', resp$name, '_', dataset_name)
+    file_name  <- paste0('ffs_rf_gaps_', resp$name, '_', dataset_name, '.RDS')
+    file_path  <- file.path(processed_data_dir, 'models', file_name)
+
+    if (file.exists(file_path)) {
+      message(paste0('Loading existing model: ', file_name))
+      ffs_models_gap[[model_name]] <- readRDS(file_path)
+    } else {
+      models_to_train_gap[[model_name]] <- list(
+        resp = resp, dataset_name = dataset_name, file_name = file_name
+      )
+    }
+  }
+}
+
+message(paste0('\n--- Gap-fraction models to train: ', length(models_to_train_gap), ' ---\n'))
+
+# train only gap-fraction models that don't exist yet
+if (length(models_to_train_gap) > 0) {
+
+  n_cores <- parallel::detectCores() - 2
+  cl <- parallel::makeCluster(n_cores)
+  doParallel::registerDoParallel(cl)
+
+  for (model_name in names(models_to_train_gap)) {
+
+    model_info   <- models_to_train_gap[[model_name]]
+    resp         <- model_info$resp
+    dataset_name <- model_info$dataset_name
+    file_name    <- model_info$file_name
+
+    message(paste0('\n--- Training model: ', model_name, ' ---\n'))
+
+    predictors    <- training_data_gap[[dataset_name]]$predictors
+    response_data <- training_data_gap[[dataset_name]]$data
+    ctrl          <- train_controls[[dataset_name]]
+    response      <- sf::st_drop_geometry(response_data[[resp$col]])
+
+    ffs_model <- CAST::ffs(
+      predictors,
+      response,
+      method = 'ranger',
+      trControl = ctrl,
+      tuneGrid = tgrid,
+      num.trees = 100,
+      importance = 'permutation',
+      seed = 999
+    )
+
+    ffs_models_gap[[model_name]] <- ffs_model
+    saveRDS(ffs_model, file.path(processed_data_dir, 'models', file_name))
+    message(paste0('Model saved: ', file_name))
+  }
+
+  parallel::stopCluster(cl)
+
+} else {
+  message('\n--- All gap-fraction models already exist, no training needed ---\n')
+}
+
+# variables selected by FFS for the gap-fraction models
+selected_features_gap <- data.frame(
+  model      = names(ffs_models_gap),
+  n_selected = sapply(ffs_models_gap, function(m) length(m$selectedvars)),
+  variables  = sapply(ffs_models_gap, function(m) paste(m$selectedvars, collapse = ', ')),
+  row.names  = NULL
+)
+
+selected_features_gap %>%
+  knitr::kable(caption = 'Variables selected by FFS per model (ALS + gap fraction)')
+
+write.csv(
+  selected_features_gap,
+  file.path(output_dir, 'ffs_selected_variables_gap.csv'),
+  row.names = F
+)
+
+# compare ALS-only (part 04) vs. ALS + gap fraction (part 04c)
+# using the global NNDM LOO CV performance of each model
+gv_table_gap <- function(models, predictor_set) {
+  do.call(rbind, lapply(names(models), function(mn) {
+    gv <- CAST::global_validation(models[[mn]])
+    data.frame(
+      key           = sub('^ffs_rf_(gaps_)?', '', mn),
+      predictor_set = predictor_set,
+      RMSE          = gv[['RMSE']],
+      R2            = gv[['Rsquared']],
+      row.names     = NULL
+    )
+  }))
+}
+
+model_comparison_gap <- dplyr::bind_rows(
+  gv_table_gap(ffs_models, 'ALS'),
+  gv_table_gap(ffs_models_gap, 'ALS_gap')
+) %>%
+  tidyr::pivot_wider(names_from = predictor_set, values_from = c(RMSE, R2)) %>%
+  dplyr::mutate(
+    delta_RMSE = RMSE_ALS_gap - RMSE_ALS,
+    delta_R2   = R2_ALS_gap - R2_ALS
+  )
+
+model_comparison_gap %>%
+  knitr::kable(digits = 2,
+               caption = 'ALS vs. ALS + gap fraction (NNDM LOO CV, global validation)')
+
+write.csv(
+  model_comparison_gap,
+  file.path(output_dir, 'model_comparison_als_vs_gap.csv'),
   row.names = F
 )
 
