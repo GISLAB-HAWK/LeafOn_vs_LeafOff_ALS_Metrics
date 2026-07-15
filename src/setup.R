@@ -21,14 +21,15 @@ if (!file.exists(paste('data')) |
        (!file.exists(paste('data/raw_data/pc_leafon_2023')) ||
         (!file.exists(paste('data/processed_data')) |
          (!file.exists(paste('data/processed_data/forest_inventory')) |
-          (!file.exists(paste('data/processed_data/pc_leafoff_2024')) |
-           (!file.exists(paste('data/processed_data/pc_leafon_2023')) |
-            (!file.exists(paste('data/processed_data/metrics')) |
-             (!file.exists(paste('data/processed_data/train_test_ds')) |
-              (!file.exists(paste('data/processed_data/models')) |
-               (!file.exists(paste('data/processed_data/predictions')) |
-                (!file.exists(paste('data/metadata'))
-                ))))))))))))))
+          (!file.exists(paste('data/processed_data/chm_leafoff')) |
+           (!file.exists(paste('data/processed_data/chm_leafon')) |
+            (!file.exists(paste('data/processed_data/gap_polygons_leafoff')) |
+             (!file.exists(paste('data/processed_data/gap_polygons_leafon')) |
+              (!file.exists(paste('data/processed_data/metrics')) |
+               (!file.exists(paste('data/processed_data/models')) |
+                (!file.exists(paste('data/processed_data/predictions')) |
+                 (!file.exists(paste('data/metadata'))
+                  )))))))))))))))
   {
   
   dir.create('data')
@@ -38,10 +39,11 @@ if (!file.exists(paste('data')) |
   dir.create('data/raw_data/pc_leafon_2023')
   dir.create('data/processed_data')
   dir.create('data/processed_data/forest_inventory')
-  dir.create('data/processed_data/pc_leafoff_2024')
-  dir.create('data/processed_data/pc_leafon_2023')
+  dir.create('data/processed_data/chm_leafoff')
+  dir.create('data/processed_data/chm_leafon')
+  dir.create('data/processed_data/gap_polygons_leafoff')
+  dir.create('data/processed_data/gap_polygons_leafon')
   dir.create('data/processed_data/metrics')
-  dir.create('data/processed_data/train_test_ds')
   dir.create('data/processed_data/models')
   dir.create('data/processed_data/predictions')
   dir.create('data/metadata')
@@ -190,8 +192,11 @@ load_packages <- function(packages, github_remotes = NULL, github_repos = NULL, 
 load_packages(
   c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2',
     'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST',
-    'parallel', 'doParallel', 'ranger'),
-  github_remotes = c(TreeGrOSSinR = 'rnuske/TreeGrOSSinR'),
+    'parallel', 'doParallel', 'ranger', 'exactextractr'),
+  github_remotes = c(
+    TreeGrOSSinR = 'rnuske/TreeGrOSSinR',
+    ForestGapR = 'carlos-alberto-silva/ForestGapR'
+  ),
   github_repos = c(lasR = 'https://r-lidar.r-universe.dev'),
   gitlab_remotes = list(
     rBDAT = list(repo = 'vochr/rBDAT', build_vignettes = TRUE)
