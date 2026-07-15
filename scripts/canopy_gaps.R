@@ -22,6 +22,12 @@ source('src/setup.R', local = TRUE)
 pc_lon_path  <- file.path(raw_data_dir, 'pc_leafon_2023')
 pc_loff_path <- file.path(raw_data_dir, 'pc_leafoff_2024')
 
+# output directories per acquisition
+chm_dir_2023 <- file.path(processed_data_dir, 'chm_leafon')
+chm_dir_2024 <- file.path(processed_data_dir, 'chm_leafoff')
+gap_dir_2023 <- file.path(processed_data_dir, 'gap_polygons_leafon')
+gap_dir_2024 <- file.path(processed_data_dir, 'gap_polygons_leafoff')
+
 # get all LAZ files per acquisition
 laz_files_2023 <- list.files(pc_lon_path,  pattern = '\\.laz$', full.names = T)
 laz_files_2024 <- list.files(pc_loff_path, pattern = '\\.laz$', full.names = T)
@@ -31,10 +37,6 @@ chm_res <- 0.5
 
 # number of cores used to compute the CHMs
 n_cores <- 32
-
-# output directories per acquisition (one CHM tile per input LAZ tile)
-chm_dir_2023 <- file.path(processed_data_dir, 'chm_leafon_2023')
-chm_dir_2024 <- file.path(processed_data_dir, 'chm_leafoff_2024')
 
 
 
@@ -102,11 +104,146 @@ load_or_build_chm_mosaic <- function(tile_dir, mosaic_file) {
 chm_lon  <- load_or_build_chm_mosaic(chm_dir_2023, chm_lon_mosaic_file)
 chm_loff <- load_or_build_chm_mosaic(chm_dir_2024, chm_loff_mosaic_file)
 
+# crop leaf-on CHM to the leaf-off extent
+chm_lon <- terra::crop(chm_lon, chm_loff, mask = T)
+
 # quick look
 par(mfrow = c(1, 2))
 terra::plot(chm_lon,  main = 'leaf-on 2023')
 terra::plot(chm_loff, main = 'leaf-off 2024')
 par(mfrow = c(1, 1))
+
+
+
+# 03 - automatic canopy gap detection
+#-------------------------------------------------------------------------------
+
+# source function for gap detection
+source('src/detect_gaps_multi_stage.R', local = T)
+
+# define height stages for multi-stage gap detection
+stages <- list(
+  list(
+    gap_height_threshold = 5,
+    size = c(10, 5000), 
+    buffer_width = 20, 
+    percentile_threshold = 10
+    ),
+  list(
+    gap_height_threshold = 10,
+    size = c(10, 5000), 
+    buffer_width = 20, 
+    percentile_threshold = 20
+    ),
+  list(
+    gap_height_threshold = 15,
+    size = c(10, 5000),
+    buffer_width = 20,
+    percentile_threshold = 30
+    )
+)
+
+# final merged gap-polygon layer per acquisition (written by the function)
+gap_file_lon  <- file.path(gap_dir_2023, 'gap_polys_lon.gpkg')
+gap_file_loff <- file.path(gap_dir_2024, 'gap_polys_loff.gpkg')
+
+# apply function to leaf-on and leaf-off CHMs
+# (skip detection and load the gaps if they already exist)
+if (file.exists(gap_file_lon)) {
+  cat('Loading existing leaf-on canopy gaps...\n')
+  canopy_gaps_lon <- sf::st_read(gap_file_lon)
+} else {
+  canopy_gaps_lon <- detect_gaps_multi_stage(
+    chm = chm_lon,
+    stages = stages,
+    output_dir = gap_dir_2023,
+    area_name = 'lon'
+  )
+}
+
+if (file.exists(gap_file_loff)) {
+  cat('Loading existing leaf-off canopy gaps...\n')
+  canopy_gaps_loff <- sf::st_read(gap_file_loff)
+} else {
+  canopy_gaps_loff <- detect_gaps_multi_stage(
+    chm = chm_loff,
+    stages = stages,
+    output_dir = gap_dir_2024,
+    area_name = 'loff'
+  )
+}
+
+
+
+# 04 - gap fraction per forest inventory plot
+#-------------------------------------------------------------------------------
+
+# plot metrics (BI plots: geometry + attributes + ALS metrics)
+plot_metrics_lon  <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
+  )
+plot_metrics_loff <- sf::st_read(
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
+  )
+
+# sample-circle radius (m)
+plot_radius <- 13
+
+# gap fraction (clipped gap area / plot-circle area) per plot
+compute_gap_fraction <- function(plots, gaps, radius = plot_radius, id_col = 'kspnr') {
+  
+  # plot circles (fine approximation) and clip the gaps to them
+  plots_buf <- sf::st_buffer(plots, dist = radius, nQuadSegs = 90)
+  inter <- sf::st_intersection(plots_buf[, id_col], gaps)
+  inter$gap_area <- as.numeric(sf::st_area(inter))
+  
+  # gap area per plot (0 where none), then fraction of the circle area (%)
+  gap_sum  <- tapply(inter$gap_area, inter[[id_col]], sum)
+  gap_area <- as.numeric(gap_sum[as.character(plots[[id_col]])])
+  gap_area[is.na(gap_area)] <- 0
+  plots$gap_fraction <- gap_area / (pi * radius^2) * 100
+
+  plots
+}
+
+plot_metrics_lon  <- compute_gap_fraction(plot_metrics_lon,  canopy_gaps_lon)
+plot_metrics_loff <- compute_gap_fraction(plot_metrics_loff, canopy_gaps_loff)
+
+# optional: write the plot metrics back with the new gap_fraction column
+sf::st_write(
+  plot_metrics_lon,
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg'), 
+  delete_dsn = T
+  )
+
+sf::st_write(
+  plot_metrics_loff,
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg'),
+  delete_dsn = T
+  )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
