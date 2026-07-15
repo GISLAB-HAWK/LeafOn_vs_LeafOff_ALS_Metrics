@@ -224,6 +224,46 @@ sf::st_write(
 
 
 
+# 05 - compare leaf-on vs leaf-off gap fractions
+#-------------------------------------------------------------------------------
+
+# long data frame with the gap fraction of both acquisitions
+gap_df <- rbind(
+  data.frame(season = 'leaf-on',  gap_fraction = plot_metrics_lon$gap_fraction),
+  data.frame(season = 'leaf-off', gap_fraction = plot_metrics_loff$gap_fraction)
+)
+gap_df$season <- factor(gap_df$season, levels = c('leaf-on', 'leaf-off'))
+
+# colors
+season_cols <- c('leaf-on' = '#009E73', 'leaf-off' = '#E69F00')
+
+# mean gap fraction per season
+gap_means <- aggregate(gap_fraction ~ season, data = gap_df, FUN = mean)
+
+# density plot with dotted vertical lines at the season means
+gap_dens <- ggplot2::ggplot(gap_df, ggplot2::aes(gap_fraction, fill = season, color = season)) +
+  ggplot2::geom_density(alpha = 0.4) +
+  ggplot2::geom_vline(
+    data = gap_means,
+    ggplot2::aes(xintercept = gap_fraction, color = season),
+    linetype = 'dotted', linewidth = 0.8, show.legend = FALSE
+  ) +
+  ggplot2::scale_fill_manual(values = season_cols, name = NULL) +
+  ggplot2::scale_color_manual(values = season_cols, name = NULL) +
+  ggplot2::labs(
+    x = 'Gap fraction [%]',
+    y = 'Density'
+  ) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(
+    panel.grid = ggplot2::element_blank(),
+    legend.position = c(0.85, 0.85)
+  )
+
+print(gap_dens)
+
+
+
 
 
 
