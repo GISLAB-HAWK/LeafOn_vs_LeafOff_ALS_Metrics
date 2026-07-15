@@ -192,8 +192,11 @@ load_packages <- function(packages, github_remotes = NULL, github_repos = NULL, 
 load_packages(
   c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2',
     'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST',
-    'parallel', 'doParallel', 'ranger'),
-  github_remotes = c(TreeGrOSSinR = 'rnuske/TreeGrOSSinR'),
+    'parallel', 'doParallel', 'ranger', 'exactextractr'),
+  github_remotes = c(
+    TreeGrOSSinR = 'rnuske/TreeGrOSSinR',
+    ForestGapR = 'carlos-alberto-silva/ForestGapR'
+  ),
   github_repos = c(lasR = 'https://r-lidar.r-universe.dev'),
   gitlab_remotes = list(
     rBDAT = list(repo = 'vochr/rBDAT', build_vignettes = TRUE)
