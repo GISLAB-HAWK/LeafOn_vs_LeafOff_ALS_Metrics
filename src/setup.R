@@ -192,7 +192,8 @@ load_packages <- function(packages, github_remotes = NULL, github_repos = NULL, 
 load_packages(
   c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2',
     'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST',
-    'parallel', 'doParallel', 'ranger', 'exactextractr'),
+    'parallel', 'doParallel', 'ranger', 'exactextractr',
+    'data.table', 'geometry', 'future'),
   github_remotes = c(
     TreeGrOSSinR = 'rnuske/TreeGrOSSinR',
     ForestGapR = 'carlos-alberto-silva/ForestGapR'
