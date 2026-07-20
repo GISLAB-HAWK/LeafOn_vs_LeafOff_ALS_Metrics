@@ -249,7 +249,7 @@ rumple <- function(X, Y, Z, surf_res = 0.5) {
 #' @param height_bin numeric, height layer thickness for the effective number
 #'        of layers (m).
 #' @param surf_res numeric, cell size of the decimation grid for the rumple index (m).
-#' @param vci_zmax numeric, upper height bound used to normalise the vci.
+#' @param vci_zmax numeric, upper height bound used to normalize the vci.
 #' @param vci_min_height numeric, lower height bound for the vci. 0 keeps all
 #'        returns including ground; the ground peak is markedly larger in
 #'        leaf-off, so the vci difference then partly measures penetration
@@ -263,7 +263,7 @@ calc_metrics <- function(X, Y, Z, Classification, ReturnNumber, NumberOfReturns,
                          area, layers = c(2, 10),
                          min_height = 0.5, box_min_size = 0.2, n_halvings = 14,
                          voxel_res = 0.2, height_bin = 1, surf_res = 0.5,
-                         vci_zmax = 40, vci_min_height = 0) {
+                         vci_zmax = 45, vci_min_height = 0) {
 
   # remove NAs consistently across all vectors
   valid <- !is.na(X) & !is.na(Y) & !is.na(Z) & !is.na(Classification) &
