@@ -30,13 +30,13 @@ source('src/setup.R', local = TRUE)
 #-------------------------------------------------------------------------------
 
 # read forest inventory plots (BI) with their attributes
-# and calculated ALS metrics (leaf-on and leaf-off)9
+# and calculated ALS metrics (leaf-on and leaf-off)
 plot_metrics_lon <- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon.gpkg')
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_lon_new.gpkg')
 )
 
 plot_metrics_loff<- sf::st_read(
-  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff.gpkg')
+  file.path(processed_data_dir, 'metrics', 'plot_metrics_loff_new.gpkg')
 )
 
 head(plot_metrics_lon)
@@ -323,15 +323,33 @@ cv_validation_results |>
 
 
 
-# 04: model training
+# 04: model training with the base ALS metrics
 #-------------------------------------------------------------------------------
 
-# define all training datasets
-# structure: list with data, predictors, and matching pixel centroids
-predictor_start_col <- 19
+# Two predictor sets are trained:
+#   - 04:  base ALS metrics, without the structural complexity metrics
+#   - 04b: with the structural complexity metrics added
+#          (box_dimension, vci, rumple, enl_richness, enl_shannon, enl_simpson)
 
-training_data <- list(
-  # leaf-on datasets
+# predictors start at 'mean' (first calc_metrics() column); fail fast if the
+# column layout of plot_metrics_*_new.gpkg ever changes
+predictor_start_col <- 19
+stopifnot(names(plot_metrics_lon)[predictor_start_col] == 'mean')
+
+# structural complexity metrics, excluded for the part 04 (base) predictor set
+structural_cols <- c('box_dimension', 'vci', 'rumple',
+                     'enl_richness', 'enl_shannon', 'enl_simpson')
+
+# response variable(s) and tuning grid
+response_vars <- list(
+  list(name = 'agb_ha', col = 'agb_ha')
+)
+
+# the 6 datasets, built with the full predictor set (including the structural
+# complexity metrics); part 04's base set drops the structural columns below.
+# pixel_centroids (predpoints) are reused for the NNDM: the plot/raster
+# locations are the same, only the metric calculation method differs
+training_data_struct_comp <- list(
   lon_all = list(
     data = plot_metrics_lon,
     predictors = sf::st_drop_geometry(
@@ -353,7 +371,6 @@ training_data <- list(
       ),
     predpoints = pixel_centroids_coniferous
   ),
-  # leaf-off datasets
   loff_all = list(
     data = plot_metrics_loff,
     predictors = sf::st_drop_geometry(
@@ -377,27 +394,22 @@ training_data <- list(
   )
 )
 
-# gap_fraction is appended as the last column of the plot metrics and therefore
-# falls inside the predictor_start_col:ncol() range. Drop it from the base ALS
-# predictor set so parts 04 / 04b stay pure ALS and it is only added explicitly
-# in part 04c.
-training_data <- lapply(training_data, function(d) {
-  d$predictors <- d$predictors[, setdiff(names(d$predictors), 'gap_fraction'), drop = FALSE]
-  d
-})
+# dataset names for iteration
+dataset_names <- names(training_data_struct_comp)
 
-# initialize NNDM for all datasets
+# NNDM depends only on the plot geometries and predpoints, not on which
+# predictor columns are used, so it is computed once here and reused for both
+# the base (part 04) and the structure-inclusive (part 04b) predictor set
 message('Initializing NNDM for all datasets...')
-nndm_results <- lapply(names(training_data), function(name) {
+nndm_results <- lapply(names(training_data_struct_comp), function(name) {
   message(paste0('  Computing NNDM for: ', name))
   CAST::nndm(
-    tpoints = training_data[[name]]$data,
-    predpoints = training_data[[name]]$predpoints
+    tpoints = training_data_struct_comp[[name]]$data,
+    predpoints = training_data_struct_comp[[name]]$predpoints
   )
 })
-names(nndm_results) <- names(training_data)
+names(nndm_results) <- names(training_data_struct_comp)
 
-# create trainControl for each dataset
 train_controls <- lapply(names(nndm_results), function(name) {
   caret::trainControl(
     method = 'cv',
@@ -407,267 +419,144 @@ train_controls <- lapply(names(nndm_results), function(name) {
     allowParallel = T
   )
 })
-names(train_controls) <- names(training_data)
+names(train_controls) <- names(training_data_struct_comp)
 
-# create grid for tuning features
+# tuning parameters for the random forest model
 tgrid <- expand.grid(
   mtry          = 1:3,
   splitrule     = 'variance',
   min.node.size = 5
 )
 
-# correlation plots for selected datasets (leaf-on as example)
-cor_lon_all <- stats::cor(training_data$lon_all$predictors, method = 'pearson')
-cor_lon_deciduous <- stats::cor(training_data$lon_deciduous$predictors, method = 'pearson')
-cor_lon_coniferous <- stats::cor(training_data$lon_coniferous$predictors, method = 'pearson')
-corrplot::corrplot(cor_lon_all, method = 'color', type = 'full',
-                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA,
-                   title = 'Correlation - leaf-on all')
-corrplot::corrplot(cor_lon_deciduous, method = 'color', type = 'full',
-                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA,
-                   title = 'Correlation - leaf-on deciduous')
-corrplot::corrplot(cor_lon_coniferous, method = 'color', type = 'full',
-                   tl.col = 'black', tl.cex = 0.6, addCoef.col = NA,
-                   title = 'Correlation - leaf-on coniferous')
-
-# train random forest models
-# implementing forward feature selection
-# starting with biomass (agb_ha) as the only response variable
-# datasets: 2 leaf conditions (lon, loff) x
-#           3 leaf types (all, deciduous, coniferous) = 6 datasets
-# total models: 1 response x 6 datasets = 6 models
-
-# define response variables
-response_vars <- list(
-  list(name = 'agb_ha', col = 'agb_ha')
-  # add further response variables later:
-  # list(name = 'total_vol_ha', col = 'total_vol_ha'),
-  # list(name = 'merch_vol_ha', col = 'merch_vol_ha'),
-  # list(name = 'tree_density', col = 'tree_density'),
-  # list(name = 'basal_area_ha', col = 'basal_area_ha'),
-  # list(name = 'dg', col = 'dg')
-)
-
-# dataset names for iteration
-dataset_names <- names(training_data)
-
-# create list to store all models
-ffs_models <- list()
-
-# check which models already exist
-models_to_train <- list()
-for (resp in response_vars) {
-  for (dataset_name in dataset_names) {
-    
-    model_name <- paste0('ffs_rf_', resp$name, '_', dataset_name)
-    file_name <- paste0('ffs_rf_', resp$name, '_', dataset_name, '.RDS')
-    file_path <- file.path(processed_data_dir, 'models', file_name)
-    
-    if (file.exists(file_path)) {
-      # load existing model
-      message(paste0('Loading existing model: ', file_name))
-      ffs_models[[model_name]] <- readRDS(file_path)
-    } else {
-      # mark for training
-      models_to_train[[model_name]] <- list(
-        resp = resp,
-        dataset_name = dataset_name,
-        file_name = file_name
-      )
-    }
-  }
-}
-
-# print summary
-message(paste0('\n--- Total models: ', length(response_vars) * length(dataset_names), ' ---'))
-message(paste0('--- Models already trained: ', length(ffs_models), ' ---'))
-message(paste0('--- Models to train: ', length(models_to_train), ' ---\n'))
-
-# train only models that don't exist yet
-if (length(models_to_train) > 0) {
-  
-  # setup parallel processing
-  n_cores <- parallel::detectCores() - 2 
-  cl <- parallel::makeCluster(n_cores)
-  doParallel::registerDoParallel(cl)
-  
-  for (model_name in names(models_to_train)) {
-    
-    model_info <- models_to_train[[model_name]]
-    resp <- model_info$resp
-    dataset_name <- model_info$dataset_name
-    file_name <- model_info$file_name
-    
-    message(paste0('\n--- Training model: ', model_name, ' ---\n'))
-    
-    # get data for this dataset
-    predictors <- training_data[[dataset_name]]$predictors
-    response_data <- training_data[[dataset_name]]$data
-    ctrl <- train_controls[[dataset_name]]
-    
-    # get response variable
-    response <- sf::st_drop_geometry(response_data[[resp$col]])
-    
-    # train model with forward feature selection
-    ffs_model <- CAST::ffs(
-      predictors,
-      response,
-      method = 'ranger',
-      trControl = ctrl,
-      tuneGrid = tgrid,
-      num.trees = 100,
-      importance = 'permutation',
-      seed = 999
-    )
-    
-    # store model in list
-    ffs_models[[model_name]] <- ffs_model
-    
-    # save model to file
-    saveRDS(
-      ffs_model,
-      file.path(processed_data_dir, 'models', file_name)
-    )
-    
-    message(paste0('Model saved: ', file_name))
-  }
-  
-  # stop parallel processing
-  parallel::stopCluster(cl)
-  
-} else {
-  message('\n--- All models already exist, no training needed ---\n')
-}
-
-# overview of the variables selected by FFS for each model
-selected_features <- data.frame(
-  model      = names(ffs_models),
-  n_selected = sapply(ffs_models, function(m) length(m$selectedvars)),
-  variables   = sapply(ffs_models, function(m) paste(m$selectedvars, collapse = ', ')),
-  row.names  = NULL
-)
-
-selected_features %>%
-  knitr::kable(caption = 'Variables selected by FFS per model')
-
-# store the selected-variables overview
-write.csv(
-  selected_features,
-  file.path(output_dir, 'ffs_selected_variables.csv'),
-  row.names = F
-)
-
-
-
-# 04b: model training with additional tree-type-share predictors
-#-------------------------------------------------------------------------------
-
-# same workflow as part 04, but the ALS metrics are complemented by the
-# deciduous and coniferous basal-area shares (main canopy, percent 0-100).
-
-# additional (tree-type-share) predictors
-extra_predictors <- c('deciduous_share', 'coniferous_share')
-
-# extend each dataset's predictor set with the two species_share variables
-# (NNDM folds / train_controls / tgrid / response_vars are reused unchanged)
-training_data_species_share <- lapply(training_data, function(d) {
-  extra <- sf::st_drop_geometry(d$data)[, extra_predictors, drop = FALSE]
-  d$predictors <- cbind(d$predictors, extra)
+# part 04 (base) predictor set: drop the structural complexity metrics
+training_data_base <- lapply(training_data_struct_comp, function(d) {
+  d$predictors <- d$predictors[, setdiff(names(d$predictors), structural_cols), drop = FALSE]
   d
 })
 
-# create list to store the extended models
-ffs_models_species_share <- list()
+# generic training loop, reused for both predictor sets
+train_ffs_models <- function(training_data_set, prefix, label) {
 
-# check which extended models already exist
-models_to_train_species_share <- list()
-for (resp in response_vars) {
-  for (dataset_name in dataset_names) {
+  models <- list()
 
-    model_name <- paste0('ffs_rf_species_share_', resp$name, '_', dataset_name)
-    file_name  <- paste0('ffs_rf_species_share_', resp$name, '_', dataset_name, '.RDS')
-    file_path  <- file.path(processed_data_dir, 'models', file_name)
+  models_to_train <- list()
+  for (resp in response_vars) {
+    for (dataset_name in dataset_names) {
 
-    if (file.exists(file_path)) {
-      message(paste0('Loading existing model: ', file_name))
-      ffs_models_species_share[[model_name]] <- readRDS(file_path)
-    } else {
-      models_to_train_species_share[[model_name]] <- list(
-        resp = resp, dataset_name = dataset_name, file_name = file_name
-      )
+      model_name <- paste0(prefix, resp$name, '_', dataset_name)
+      file_name  <- paste0(prefix, resp$name, '_', dataset_name, '.RDS')
+      file_path  <- file.path(processed_data_dir, 'models', file_name)
+
+      if (file.exists(file_path)) {
+        message(paste0('Loading existing model: ', file_name))
+        models[[model_name]] <- readRDS(file_path)
+      } else {
+        models_to_train[[model_name]] <- list(
+          resp = resp, dataset_name = dataset_name, file_name = file_name
+        )
+      }
     }
   }
-}
 
-message(paste0('\n--- Extended models to train: ', length(models_to_train_species_share), ' ---\n'))
+  message(paste0('\n--- ', label, ' models to train: ', length(models_to_train), ' ---\n'))
 
-# train only extended models that don't exist yet
-if (length(models_to_train_species_share) > 0) {
+  if (length(models_to_train) > 0) {
 
-  n_cores <- parallel::detectCores() - 2
-  cl <- parallel::makeCluster(n_cores)
-  doParallel::registerDoParallel(cl)
+    n_cores <- parallel::detectCores() - 2
+    cl <- parallel::makeCluster(n_cores)
+    doParallel::registerDoParallel(cl)
 
-  for (model_name in names(models_to_train_species_share)) {
+    for (model_name in names(models_to_train)) {
 
-    model_info   <- models_to_train_species_share[[model_name]]
-    resp         <- model_info$resp
-    dataset_name <- model_info$dataset_name
-    file_name    <- model_info$file_name
+      model_info   <- models_to_train[[model_name]]
+      resp         <- model_info$resp
+      dataset_name <- model_info$dataset_name
+      file_name    <- model_info$file_name
 
-    message(paste0('\n--- Training model: ', model_name, ' ---\n'))
+      message(paste0('\n--- Training model: ', model_name, ' ---\n'))
 
-    predictors    <- training_data_species_share[[dataset_name]]$predictors
-    response_data <- training_data_species_share[[dataset_name]]$data
-    ctrl          <- train_controls[[dataset_name]]
-    response      <- sf::st_drop_geometry(response_data[[resp$col]])
+      predictors    <- training_data_set[[dataset_name]]$predictors
+      response_data <- training_data_set[[dataset_name]]$data
+      ctrl          <- train_controls[[dataset_name]]
+      response      <- sf::st_drop_geometry(response_data[[resp$col]])
 
-    ffs_model <- CAST::ffs(
-      predictors,
-      response,
-      method = 'ranger',
-      trControl = ctrl,
-      tuneGrid = tgrid,
-      num.trees = 100,
-      importance = 'permutation',
-      seed = 999
-    )
+      ffs_model <- CAST::ffs(
+        predictors,
+        response,
+        method = 'ranger',
+        trControl = ctrl,
+        tuneGrid = tgrid,
+        num.trees = 100,
+        importance = 'permutation',
+        seed = 999
+      )
 
-    ffs_models_species_share[[model_name]] <- ffs_model
-    saveRDS(ffs_model, file.path(processed_data_dir, 'models', file_name))
-    message(paste0('Model saved: ', file_name))
+      models[[model_name]] <- ffs_model
+      saveRDS(ffs_model, file.path(processed_data_dir, 'models', file_name))
+      message(paste0('Model saved: ', file_name))
+    }
+
+    parallel::stopCluster(cl)
+
+  } else {
+    message(paste0('\n--- All ', label, ' models already exist, no training needed ---\n'))
   }
 
-  parallel::stopCluster(cl)
-
-} else {
-  message('\n--- All extended models already exist, no training needed ---\n')
+  models
 }
 
-# variables selected by FFS for the extended models
-selected_features_species_share <- data.frame(
-  model      = names(ffs_models_species_share),
-  n_selected = sapply(ffs_models_species_share, function(m) length(m$selectedvars)),
-  variables  = sapply(ffs_models_species_share, function(m) paste(m$selectedvars, collapse = ', ')),
+ffs_models_base <- train_ffs_models(training_data_base, 'ffs_rf_base_', 'base ALS')
+
+selected_features_base <- data.frame(
+  model      = names(ffs_models_base),
+  n_selected = sapply(ffs_models_base, function(m) length(m$selectedvars)),
+  variables  = sapply(ffs_models_base, function(m) paste(m$selectedvars, collapse = ', ')),
   row.names  = NULL
 )
 
-selected_features_species_share %>%
-  knitr::kable(caption = 'Variables selected by FFS per model (ALS + species_share)')
+selected_features_base %>%
+  knitr::kable(caption = 'Variables selected by FFS per model (base ALS metrics)')
 
 write.csv(
-  selected_features_species_share,
-  file.path(output_dir, 'ffs_selected_variables_species_share.csv'),
+  selected_features_base,
+  file.path(output_dir, 'ffs_selected_variables_base.csv'),
   row.names = F
 )
 
-# compare ALS-only (part 04) vs. ALS + species_share (part 04b)
-# using the global NNDM LOO CV performance of each model
-gv_table <- function(models, predictor_set) {
+
+
+# 04b: model training with structural complexity metrics added
+#-------------------------------------------------------------------------------
+
+# box_dimension, vci, rumple, enl_richness, enl_shannon, enl_simpson added to
+# the base ALS metrics from part 04. Same data / NNDM folds / tgrid / seed as
+# part 04, so this is directly comparable to it.
+
+ffs_models_struct_comp <- train_ffs_models(training_data_struct_comp, 'ffs_rf_struct_comp_', 'ALS + structural complexity')
+
+selected_features_struct_comp <- data.frame(
+  model      = names(ffs_models_struct_comp),
+  n_selected = sapply(ffs_models_struct_comp, function(m) length(m$selectedvars)),
+  variables  = sapply(ffs_models_struct_comp, function(m) paste(m$selectedvars, collapse = ', ')),
+  row.names  = NULL
+)
+
+selected_features_struct_comp %>%
+  knitr::kable(caption = 'Variables selected by FFS per model (ALS + structural complexity)')
+
+write.csv(
+  selected_features_struct_comp,
+  file.path(output_dir, 'ffs_selected_variables_struct_comp.csv'),
+  row.names = F
+)
+
+# compare the base ALS metrics (part 04) against the ALS + structural complexity
+# metrics (part 04b), using the global NNDM LOO CV performance of each model
+gv_table <- function(models, predictor_set, prefix) {
   do.call(rbind, lapply(names(models), function(mn) {
     gv <- CAST::global_validation(models[[mn]])
     data.frame(
-      key           = sub('^ffs_rf_(species_share_)?', '', mn),
+      key           = sub(paste0('^', prefix), '', mn),
       predictor_set = predictor_set,
       RMSE          = gv[['RMSE']],
       R2            = gv[['Rsquared']],
@@ -677,161 +566,22 @@ gv_table <- function(models, predictor_set) {
 }
 
 model_comparison <- dplyr::bind_rows(
-  gv_table(ffs_models, 'ALS'),
-  gv_table(ffs_models_species_share, 'ALS_species_share')
+  gv_table(ffs_models_base,        'base',        'ffs_rf_base_'),
+  gv_table(ffs_models_struct_comp, 'struct_comp', 'ffs_rf_struct_comp_')
 ) %>%
   tidyr::pivot_wider(names_from = predictor_set, values_from = c(RMSE, R2)) %>%
   dplyr::mutate(
-    delta_RMSE = RMSE_ALS_species_share - RMSE_ALS,
-    delta_R2   = R2_ALS_species_share - R2_ALS
+    delta_RMSE = RMSE_struct_comp - RMSE_base,
+    delta_R2   = R2_struct_comp - R2_base
   )
 
 model_comparison %>%
   knitr::kable(digits = 2,
-               caption = 'ALS vs. ALS + species_share (NNDM LOO CV, global validation)')
+               caption = 'Base ALS vs. ALS + structural complexity (NNDM LOO CV, global validation)')
 
 write.csv(
   model_comparison,
-  file.path(output_dir, 'model_comparison_als_vs_species_share.csv'),
-  row.names = F
-)
-
-
-
-# 04c: model training with the gap fraction as additional predictor
-#-------------------------------------------------------------------------------
-
-# same workflow as part 04, but the ALS metrics are complemented by the
-# canopy gap fraction per plot (percent 0-100); no tree-type shares here.
-
-# additional (gap fraction) predictor
-extra_predictors_gap <- c('gap_fraction')
-
-# extend each dataset's predictor set with the gap fraction variable
-# (NNDM folds / train_controls / tgrid / response_vars are reused unchanged)
-training_data_gap <- lapply(training_data, function(d) {
-  extra <- sf::st_drop_geometry(d$data)[, extra_predictors_gap, drop = FALSE]
-  d$predictors <- cbind(d$predictors, extra)
-  d
-})
-
-# create list to store the gap-fraction models
-ffs_models_gap <- list()
-
-# check which gap-fraction models already exist
-models_to_train_gap <- list()
-for (resp in response_vars) {
-  for (dataset_name in dataset_names) {
-
-    model_name <- paste0('ffs_rf_gaps_', resp$name, '_', dataset_name)
-    file_name  <- paste0('ffs_rf_gaps_', resp$name, '_', dataset_name, '.RDS')
-    file_path  <- file.path(processed_data_dir, 'models', file_name)
-
-    if (file.exists(file_path)) {
-      message(paste0('Loading existing model: ', file_name))
-      ffs_models_gap[[model_name]] <- readRDS(file_path)
-    } else {
-      models_to_train_gap[[model_name]] <- list(
-        resp = resp, dataset_name = dataset_name, file_name = file_name
-      )
-    }
-  }
-}
-
-message(paste0('\n--- Gap-fraction models to train: ', length(models_to_train_gap), ' ---\n'))
-
-# train only gap-fraction models that don't exist yet
-if (length(models_to_train_gap) > 0) {
-
-  n_cores <- parallel::detectCores() - 2
-  cl <- parallel::makeCluster(n_cores)
-  doParallel::registerDoParallel(cl)
-
-  for (model_name in names(models_to_train_gap)) {
-
-    model_info   <- models_to_train_gap[[model_name]]
-    resp         <- model_info$resp
-    dataset_name <- model_info$dataset_name
-    file_name    <- model_info$file_name
-
-    message(paste0('\n--- Training model: ', model_name, ' ---\n'))
-
-    predictors    <- training_data_gap[[dataset_name]]$predictors
-    response_data <- training_data_gap[[dataset_name]]$data
-    ctrl          <- train_controls[[dataset_name]]
-    response      <- sf::st_drop_geometry(response_data[[resp$col]])
-
-    ffs_model <- CAST::ffs(
-      predictors,
-      response,
-      method = 'ranger',
-      trControl = ctrl,
-      tuneGrid = tgrid,
-      num.trees = 100,
-      importance = 'permutation',
-      seed = 999
-    )
-
-    ffs_models_gap[[model_name]] <- ffs_model
-    saveRDS(ffs_model, file.path(processed_data_dir, 'models', file_name))
-    message(paste0('Model saved: ', file_name))
-  }
-
-  parallel::stopCluster(cl)
-
-} else {
-  message('\n--- All gap-fraction models already exist, no training needed ---\n')
-}
-
-# variables selected by FFS for the gap-fraction models
-selected_features_gap <- data.frame(
-  model      = names(ffs_models_gap),
-  n_selected = sapply(ffs_models_gap, function(m) length(m$selectedvars)),
-  variables  = sapply(ffs_models_gap, function(m) paste(m$selectedvars, collapse = ', ')),
-  row.names  = NULL
-)
-
-selected_features_gap %>%
-  knitr::kable(caption = 'Variables selected by FFS per model (ALS + gap fraction)')
-
-write.csv(
-  selected_features_gap,
-  file.path(output_dir, 'ffs_selected_variables_gap.csv'),
-  row.names = F
-)
-
-# compare ALS-only (part 04) vs. ALS + gap fraction (part 04c)
-# using the global NNDM LOO CV performance of each model
-gv_table_gap <- function(models, predictor_set) {
-  do.call(rbind, lapply(names(models), function(mn) {
-    gv <- CAST::global_validation(models[[mn]])
-    data.frame(
-      key           = sub('^ffs_rf_(gaps_)?', '', mn),
-      predictor_set = predictor_set,
-      RMSE          = gv[['RMSE']],
-      R2            = gv[['Rsquared']],
-      row.names     = NULL
-    )
-  }))
-}
-
-model_comparison_gap <- dplyr::bind_rows(
-  gv_table_gap(ffs_models, 'ALS'),
-  gv_table_gap(ffs_models_gap, 'ALS_gap')
-) %>%
-  tidyr::pivot_wider(names_from = predictor_set, values_from = c(RMSE, R2)) %>%
-  dplyr::mutate(
-    delta_RMSE = RMSE_ALS_gap - RMSE_ALS,
-    delta_R2   = R2_ALS_gap - R2_ALS
-  )
-
-model_comparison_gap %>%
-  knitr::kable(digits = 2,
-               caption = 'ALS vs. ALS + gap fraction (NNDM LOO CV, global validation)')
-
-write.csv(
-  model_comparison_gap,
-  file.path(output_dir, 'model_comparison_als_vs_gap.csv'),
+  file.path(output_dir, 'model_comparison_base_vs_struct_comp.csv'),
   row.names = F
 )
 
