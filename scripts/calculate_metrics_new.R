@@ -119,3 +119,105 @@ if (file.exists(metrics_lon_file) & file.exists(metrics_loff_file)) {
 
 head(pc_lon_metrics)
 head(pc_loff_metrics)
+
+
+
+# 03: correlation analysis of metrics with forest inventory attributes
+#-------------------------------------------------------------------------------
+
+# response variables (forest inventory attributes)
+response_vars <- c('agb_ha')
+# response_vars <- c('agb_ha', 'total_vol_ha', 'merch_vol_ha',
+#                    'tree_density', 'basal_area_ha', 'dg')
+
+# leaf-on and leaf-off datasets (without geometry)
+metrics_data <- list(
+  lon  = sf::st_drop_geometry(pc_lon_metrics),
+  loff = sf::st_drop_geometry(pc_loff_metrics)
+)
+
+# metric (predictor) columns: everything from the first calc_metrics() column
+# ('mean') to the end of the table
+predictor_start_col <- 19
+stopifnot(names(metrics_data$lon)[predictor_start_col] == 'mean')
+metric_cols <- names(metrics_data$lon)[predictor_start_col:ncol(metrics_data$lon)]
+
+# leaf types to analyse ('all' = deciduous and coniferous combined)
+leaf_types <- c('all', 'deciduous', 'coniferous')
+
+# compute Pearson correlations between each metric and each response variable,
+# separately for leaf-on/leaf-off and for all/deciduous/coniferous plots
+correlation_results <- do.call(rbind, lapply(names(metrics_data), function(leaf_condition) {
+
+  df_full <- metrics_data[[leaf_condition]]
+
+  do.call(rbind, lapply(leaf_types, function(lt) {
+
+    # subset by dominant leaf type ('all' keeps every plot)
+    df <- if (lt == 'all') df_full else df_full[df_full$dominant_leaf_type == lt, ]
+
+    do.call(rbind, lapply(response_vars, function(resp) {
+      data.frame(
+        leaf_condition = leaf_condition,
+        leaf_type = lt,
+        response_var = resp,
+        metric = metric_cols,
+        correlation = sapply(metric_cols, function(m) {
+          stats::cor(df[[m]], df[[resp]], use = 'complete.obs', method = 'pearson')
+        }),
+        row.names = NULL
+      )
+    }))
+  }))
+}))
+
+# display the correlation table (strongest correlations first)
+correlation_results %>%
+  dplyr::arrange(response_var, leaf_type, leaf_condition, dplyr::desc(abs(correlation))) %>%
+  knitr::kable(digits = 2)
+
+# store the correlation table
+write.csv(
+  correlation_results,
+  file.path(output_dir, 'metric_inventory_correlations.csv'),
+  row.names = F
+)
+
+# plot: leaf-on vs leaf-off correlation with the response variable per metric,
+# faceted by leaf type (all / deciduous / coniferous)
+for (resp in response_vars) {
+
+  corr_resp <- correlation_results %>%
+    dplyr::filter(response_var == resp) %>%
+    dplyr::mutate(
+      leaf_condition = factor(
+        ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
+        levels = c('leaf-on', 'leaf-off')
+      ),
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+      metric = factor(metric, levels = rev(metric_cols))
+    )
+
+  if (nrow(corr_resp) == 0) next
+
+  corr_plot <- ggplot(corr_resp, aes(x = metric, y = correlation, fill = leaf_condition)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+    geom_hline(yintercept = 0, colour = 'grey40') +
+    facet_wrap(~ leaf_type, nrow = 1) +
+    scale_fill_manual(values = c('leaf-on' = 'gray40', 'leaf-off' = 'gray70'),
+                      name = '') +
+    labs(x = '', y = paste0('Pearson correlation with ', resp)) +
+    coord_flip() +
+    theme_bw() +
+    theme(panel.grid = element_blank())
+
+  print(corr_plot)
+
+  ggplot2::ggsave(
+    filename = file.path(output_dir,
+                         paste0('metric_', resp, '_correlations.pdf')),
+    plot = corr_plot,
+    width = 10,
+    height = 8
+  )
+}
