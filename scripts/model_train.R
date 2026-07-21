@@ -505,7 +505,9 @@ train_ffs_models <- function(training_data_set, prefix, label) {
   models
 }
 
-ffs_models_base <- train_ffs_models(training_data_base, 'ffs_rf_base_', 'base ALS')
+ffs_models_base <- train_ffs_models(
+  training_data_base, 'ffs_rf_base_', 'base ALS'
+  )
 
 selected_features_base <- data.frame(
   model      = names(ffs_models_base),
@@ -532,7 +534,9 @@ write.csv(
 # the base ALS metrics from part 04. Same data / NNDM folds / tgrid / seed as
 # part 04, so this is directly comparable to it.
 
-ffs_models_struct_comp <- train_ffs_models(training_data_struct_comp, 'ffs_rf_struct_comp_', 'ALS + structural complexity')
+ffs_models_struct_comp <- train_ffs_models(
+  training_data_struct_comp, 'ffs_rf_struct_comp_', 'ALS + structural complexity'
+  )
 
 selected_features_struct_comp <- data.frame(
   model      = names(ffs_models_struct_comp),
@@ -590,8 +594,8 @@ write.csv(
 # 05: validation
 #-------------------------------------------------------------------------------
 
-# print summary of all trained models (ALS-only and ALS + species_share)
-all_trained_models <- c(ffs_models, ffs_models_species_share)
+# print summary of all trained models (base ALS and ALS + structural complexity)
+all_trained_models <- c(ffs_models_base, ffs_models_struct_comp)
 message('\n--- Summary of all trained models ---\n')
 for (model_name in names(all_trained_models)) {
   message(paste0('\n', model_name, ':'))
@@ -599,7 +603,7 @@ for (model_name in names(all_trained_models)) {
 }
 
 # extract cross-validation predictions from a set of trained models
-# (cached to disk; file_tag keeps ALS and species_share predictions separate)
+# (cached to disk; file_tag keeps the base and struct_comp predictions separate)
 extract_cv_predictions <- function(models, model_prefix, file_tag) {
 
   preds <- list()
@@ -628,7 +632,9 @@ extract_cv_predictions <- function(models, model_prefix, file_tag) {
         cv_pred <- model$pred
 
         # link CV predictions to the original plot geometries
-        plot_data  <- training_data[[dataset_name]]$data
+        # (base and struct_comp share the same plot data, only the predictor
+        # columns differ, so either training data list can be used here)
+        plot_data  <- training_data_struct_comp[[dataset_name]]$data
         cv_pred_sf <- plot_data[cv_pred$rowIndex, ] %>%
           dplyr::select(key, kspnr, abt) %>%
           dplyr::mutate(pred = cv_pred$pred, obs = cv_pred$obs)
@@ -643,12 +649,14 @@ extract_cv_predictions <- function(models, model_prefix, file_tag) {
   preds
 }
 
-# ALS-only predictions
-cv_predictions <- extract_cv_predictions(ffs_models, 'ffs_rf_', '')
+# base ALS predictions
+cv_predictions_base <- extract_cv_predictions(
+  ffs_models_base, 'ffs_rf_base_', 'base_'
+)
 
-# ALS + species_share predictions
-cv_predictions_species_share <- extract_cv_predictions(
-  ffs_models_species_share, 'ffs_rf_species_share_', 'species_share_'
+# ALS + structural complexity predictions
+cv_predictions_struct_comp <- extract_cv_predictions(
+  ffs_models_struct_comp, 'ffs_rf_struct_comp_', 'struct_comp_'
 )
 
 # compute validation metrics for a set of CV predictions
@@ -674,8 +682,8 @@ compute_cv_metrics <- function(cv_preds, predictor_set) {
 
 # combine metrics of both predictor sets
 model_metrics <- dplyr::bind_rows(
-  compute_cv_metrics(cv_predictions, 'ALS'),
-  compute_cv_metrics(cv_predictions_species_share, 'ALS+species_share')
+  compute_cv_metrics(cv_predictions_base,        'base'),
+  compute_cv_metrics(cv_predictions_struct_comp, 'struct_comp')
 ) %>%
   dplyr::mutate(
     response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
@@ -692,7 +700,7 @@ model_metrics <- dplyr::bind_rows(
     )
   )
 
-# assemble the final metrics table (ALS vs. ALS+species_share side by side)
+# assemble the final metrics table (base vs. struct_comp side by side)
 metrics_table <- model_metrics %>%
   dplyr::select(response_var, leaf_condition, leaf_type, predictor_set,
                 n, R2, RMSE, rel_RMSE, MAE, bias, rel_bias) %>%
@@ -733,16 +741,75 @@ forest_inv_units <- c(
   'tree_density'  = '"n" ~ "ha"^-1'
 )
 
+# plot: leaf-on vs. leaf-off performance, for both predictor sets
+# (rows = metric, columns = predictor set, bars grouped by leaf condition)
+season_cols <- c('leaf-on' = 'gray40', 'leaf-off' = 'gray70')
+
+for (resp in unique(model_metrics$response_var)) {
+
+  season_plot_data <- model_metrics %>%
+    dplyr::filter(response_var == resp) %>%
+    dplyr::select(predictor_set, leaf_condition, leaf_type, rel_RMSE, MAE, R2) %>%
+    tidyr::pivot_longer(cols = c(rel_RMSE, MAE, R2),
+                        names_to = 'metric', values_to = 'value') %>%
+    dplyr::mutate(
+      leaf_condition = factor(
+        ifelse(leaf_condition == 'lon', 'leaf-on', 'leaf-off'),
+        levels = c('leaf-on', 'leaf-off')
+      ),
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+      predictor_set = factor(
+        predictor_set,
+        levels = c('base', 'struct_comp'),
+        labels = c('base ALS', 'ALS + structural complexity')
+      ),
+      metric = factor(metric, levels = c('rel_RMSE', 'MAE', 'R2'),
+                      labels = c('relative RMSE [%]', 'MAE', 'R²'))
+    )
+
+  if (nrow(season_plot_data) == 0) next
+
+  p_season <- ggplot(season_plot_data,
+                     aes(x = leaf_type, y = value, fill = leaf_condition)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+    geom_text(aes(label = sprintf('%.2f', value)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.4, size = 2.5) +
+    facet_grid(metric ~ predictor_set, scales = 'free_y', switch = 'y') +
+    scale_fill_manual(values = season_cols, name = '') +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+    labs(title = bquote('Leaf-on vs. leaf-off:' ~ .(forest_inv_names[resp]) ~
+                        '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
+         x = '', y = '') +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+          panel.grid = element_blank(),
+          legend.position = 'bottom',
+          strip.background = element_rect(fill = 'lightgrey'),
+          strip.text = element_text(face = 'bold'),
+          strip.placement = 'outside')
+
+  print(p_season)
+
+  ggplot2::ggsave(
+    filename = file.path(output_dir,
+                         paste0('leafon_vs_leafoff_', resp, '.pdf')),
+    plot = p_season, width = 9, height = 8
+  )
+}
+
+
+
 # predicted vs. observed plots
 
 # combine CV predictions of both predictor sets into one data frame
 cv_predictions_df <- dplyr::bind_rows(
-  do.call(rbind, lapply(names(cv_predictions), function(nm)
-    cv_predictions[[nm]] %>% sf::st_drop_geometry() %>%
-      dplyr::mutate(model_name = nm, predictor_set = 'ALS'))),
-  do.call(rbind, lapply(names(cv_predictions_species_share), function(nm)
-    cv_predictions_species_share[[nm]] %>% sf::st_drop_geometry() %>%
-      dplyr::mutate(model_name = nm, predictor_set = 'ALS+species_share')))
+  do.call(rbind, lapply(names(cv_predictions_base), function(nm)
+    cv_predictions_base[[nm]] %>% sf::st_drop_geometry() %>%
+      dplyr::mutate(model_name = nm, predictor_set = 'base'))),
+  do.call(rbind, lapply(names(cv_predictions_struct_comp), function(nm)
+    cv_predictions_struct_comp[[nm]] %>% sf::st_drop_geometry() %>%
+      dplyr::mutate(model_name = nm, predictor_set = 'struct_comp')))
 ) %>%
   dplyr::mutate(
     response_var = gsub('pred_(.+)_(lon|loff)_.*', '\\1', model_name),
@@ -759,9 +826,15 @@ cv_predictions_df <- dplyr::bind_rows(
     )
   )
 
+# readable labels for the predictor sets (used as plot subtitle)
+pset_labels <- c(
+  'base'        = 'base ALS metrics',
+  'struct_comp' = 'ALS + structural complexity metrics'
+)
+
 # one predicted vs. observed figure per response variable and predictor set
 for (resp in unique(cv_predictions_df$response_var)) {
-  for (pset in c('ALS', 'ALS+species_share')) {
+  for (pset in c('base', 'struct_comp')) {
 
     plot_data_resp <- cv_predictions_df %>%
       dplyr::filter(response_var == resp, predictor_set == pset) %>%
@@ -801,7 +874,7 @@ for (resp in unique(cv_predictions_df$response_var)) {
       coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
       labs(title = bquote('Predicted vs. Observed:' ~ .(forest_inv_label) ~
                           '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
-           subtitle = pset,
+           subtitle = pset_labels[pset],
            x = 'Predicted',
            y = 'Observed') +
       theme_bw() +
@@ -819,6 +892,181 @@ for (resp in unique(cv_predictions_df$response_var)) {
       plot = p, width = 10, height = 8
     )
   }
+}
+
+# plot: how each plot's prediction moves from leaf-on to leaf-off
+# arrows pointing towards the 1:1 line mean the leaf-off model
+# predicts that plot better, arrows pointing away mean it predicts it worse
+for (resp in unique(cv_predictions_df$response_var)) {
+
+  arrow_data <- cv_predictions_df %>%
+    dplyr::filter(response_var == resp) %>%
+    dplyr::select(predictor_set, leaf_type, kspnr, obs, leaf_condition, pred) %>%
+    tidyr::pivot_wider(names_from = leaf_condition, values_from = pred) %>%
+    dplyr::filter(!is.na(`leaf-on`), !is.na(`leaf-off`)) %>%
+    dplyr::mutate(
+      pred_lon  = `leaf-on`,
+      pred_loff = `leaf-off`,
+      direction = ifelse(abs(pred_loff - obs) < abs(pred_lon - obs),
+                         'closer to 1:1', 'further from 1:1'),
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+      predictor_set = factor(
+        predictor_set,
+        levels = c('base', 'struct_comp'),
+        labels = c('base ALS', 'ALS + structural complexity')
+      )
+    )
+
+  if (nrow(arrow_data) == 0) next
+
+  axis_min <- min(c(arrow_data$pred_lon, arrow_data$pred_loff, arrow_data$obs), na.rm = T)
+  axis_max <- max(c(arrow_data$pred_lon, arrow_data$pred_loff, arrow_data$obs), na.rm = T)
+
+  # share of plots that improve, per panel (for annotation)
+  # the two-sided binomial test asks whether that share differs from 50%,
+  # i.e. whether either season is systematically better on a per-plot basis
+  arrow_summary <- arrow_data %>%
+    dplyr::group_by(predictor_set, leaf_type) %>%
+    dplyr::summarise(
+      n_plots      = dplyr::n(),
+      n_closer     = sum(direction == 'closer to 1:1'),
+      share_closer = n_closer / n_plots * 100,
+      p_value      = stats::binom.test(n_closer, n_plots, p = 0.5)$p.value,
+      .groups = 'drop'
+    ) %>%
+    dplyr::mutate(
+      label = paste0(round(share_closer), '% closer (n = ', n_plots, ')\n',
+                     'p = ', format.pval(p_value, digits = 2, eps = 0.001))
+    )
+
+  p_arrows <- ggplot(arrow_data, aes(x = pred_lon, y = obs)) +
+    geom_abline(slope = 1, intercept = 0, linewidth = 0.8,
+                color = 'black', linetype = 'dashed') +
+    geom_segment(aes(xend = pred_loff, yend = obs, colour = direction),
+                 arrow = ggplot2::arrow(length = grid::unit(0.10, 'cm'),
+                                        type = 'closed'),
+                 linewidth = 0.4, alpha = 0.85) +
+    geom_point(size = 0.7, colour = 'grey30', alpha = 0.6) +
+    geom_text(data = arrow_summary,
+              aes(x = axis_min + (axis_max - axis_min) * 0.05,
+                  y = axis_max - (axis_max - axis_min) * 0.05,
+                  label = label),
+              hjust = 0, vjust = 1, size = 3, inherit.aes = FALSE) +
+    facet_grid(predictor_set ~ leaf_type) +
+    coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
+    scale_colour_manual(
+      values = c('closer to 1:1' = '#009E73', 'further from 1:1' = '#D55E00'),
+      name = 'leaf-off prediction'
+    ) +
+    labs(title = bquote('Shift from leaf-on to leaf-off:' ~ .(forest_inv_names[resp]) ~
+                        '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
+         subtitle = 'arrow start = leaf-on prediction, arrow head = leaf-off prediction',
+         x = 'Predicted',
+         y = 'Observed') +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+          plot.subtitle = element_text(hjust = 0.5, size = 8),
+          strip.background = element_rect(fill = 'lightgrey'),
+          strip.text = element_text(face = 'bold'),
+          panel.grid = element_blank(),
+          legend.position = 'bottom')
+
+  print(p_arrows)
+
+  ggplot2::ggsave(
+    filename = file.path(output_dir,
+                         paste0('pred_shift_lon_to_loff_', resp, '.pdf')),
+    plot = p_arrows, width = 10, height = 8
+  )
+}
+
+# plot: how each plot's prediction moves when the structural complexity
+# metrics are added to the base ALS metrics
+# same principle as the plot above, but the arrow now starts at the base ALS
+# prediction and points to the ALS + structural complexity prediction. 
+for (resp in unique(cv_predictions_df$response_var)) {
+
+  arrow_data_struct <- cv_predictions_df %>%
+    dplyr::filter(response_var == resp, leaf_condition == 'leaf-off') %>%
+    dplyr::select(leaf_type, kspnr, obs, predictor_set, pred) %>%
+    tidyr::pivot_wider(names_from = predictor_set, values_from = pred) %>%
+    dplyr::filter(!is.na(base), !is.na(struct_comp)) %>%
+    dplyr::mutate(
+      pred_base   = base,
+      pred_struct = struct_comp,
+      direction = ifelse(abs(pred_struct - obs) < abs(pred_base - obs),
+                         'closer to 1:1', 'further from 1:1'),
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous'))
+    )
+
+  if (nrow(arrow_data_struct) == 0) next
+
+  axis_min <- min(c(arrow_data_struct$pred_base, arrow_data_struct$pred_struct,
+                    arrow_data_struct$obs), na.rm = T)
+  axis_max <- max(c(arrow_data_struct$pred_base, arrow_data_struct$pred_struct,
+                    arrow_data_struct$obs), na.rm = T)
+
+  # share of plots that improve, per panel (for annotation)
+  # the two-sided binomial test asks whether that share differs from 50%,
+  # i.e. whether adding the structural metrics systematically helps on a
+  # per-plot basis
+  # p_adj applies the Holm correction over the three leaf types of this figure
+  arrow_summary_struct <- arrow_data_struct %>%
+    dplyr::group_by(leaf_type) %>%
+    dplyr::summarise(
+      n_plots      = dplyr::n(),
+      n_closer     = sum(direction == 'closer to 1:1'),
+      share_closer = n_closer / n_plots * 100,
+      p_value      = stats::binom.test(n_closer, n_plots, p = 0.5)$p.value,
+      .groups = 'drop'
+    ) %>%
+    dplyr::mutate(
+      p_adj = stats::p.adjust(p_value, method = 'holm'),
+      label = paste0(round(share_closer), '% closer (n = ', n_plots, ')\n',
+                     'p = ', format.pval(p_value, digits = 2, eps = 0.001),
+                     '\nHolm: ', format.pval(p_adj, digits = 2, eps = 0.001))
+    )
+
+  p_arrows_struct <- ggplot(arrow_data_struct, aes(x = pred_base, y = obs)) +
+    geom_abline(slope = 1, intercept = 0, linewidth = 0.8,
+                color = 'black', linetype = 'dashed') +
+    geom_segment(aes(xend = pred_struct, yend = obs, colour = direction),
+                 arrow = ggplot2::arrow(length = grid::unit(0.10, 'cm'),
+                                        type = 'closed'),
+                 linewidth = 0.4, alpha = 0.85) +
+    geom_point(size = 0.7, colour = 'grey30', alpha = 0.6) +
+    geom_text(data = arrow_summary_struct,
+              aes(x = axis_min + (axis_max - axis_min) * 0.05,
+                  y = axis_max - (axis_max - axis_min) * 0.05,
+                  label = label),
+              hjust = 0, vjust = 1, size = 3, inherit.aes = FALSE) +
+    facet_wrap(~ leaf_type, nrow = 1) +
+    coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
+    scale_colour_manual(
+      values = c('closer to 1:1' = '#009E73', 'further from 1:1' = '#D55E00'),
+      name = 'with structural complexity'
+    ) +
+    labs(title = bquote('Effect of adding structural complexity (leaf-off):' ~
+                        .(forest_inv_names[resp]) ~
+                        '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
+         subtitle = 'arrow start = base ALS prediction, arrow head = ALS + structural complexity prediction',
+         x = 'Predicted',
+         y = 'Observed') +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+          plot.subtitle = element_text(hjust = 0.5, size = 8),
+          strip.background = element_rect(fill = 'lightgrey'),
+          strip.text = element_text(face = 'bold'),
+          panel.grid = element_blank(),
+          legend.position = 'bottom')
+
+  print(p_arrows_struct)
+
+  ggplot2::ggsave(
+    filename = file.path(output_dir,
+                         paste0('pred_shift_base_to_struct_comp_', resp, '.pdf')),
+    plot = p_arrows_struct, width = 10, height = 4.5
+  )
 }
 
 
