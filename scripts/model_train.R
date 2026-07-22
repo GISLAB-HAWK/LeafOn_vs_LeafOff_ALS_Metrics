@@ -938,6 +938,9 @@ for (resp in unique(cv_predictions_df$response_var)) {
   # share of plots that improve, per panel (for annotation)
   # the two-sided binomial test asks whether that share differs from 50%,
   # i.e. whether either season is systematically better on a per-plot basis
+  # p_adj applies the Holm correction over the six panels of this figure
+  # (2 predictor sets x 3 leaf types); it is applied unconditionally, so the
+  # correction does not depend on which raw p-values happen to be small
   arrow_summary <- arrow_data %>%
     dplyr::group_by(predictor_set, leaf_type) %>%
     dplyr::summarise(
@@ -948,8 +951,10 @@ for (resp in unique(cv_predictions_df$response_var)) {
       .groups = 'drop'
     ) %>%
     dplyr::mutate(
+      p_adj = stats::p.adjust(p_value, method = 'holm'),
       label = paste0(round(share_closer), '% closer (n = ', n_plots, ')\n',
-                     'p = ', format.pval(p_value, digits = 2, eps = 0.001))
+                     'p = ', format.pval(p_value, digits = 2, eps = 0.001),
+                     '\nHolm: ', format.pval(p_adj, digits = 2, eps = 0.001))
     )
 
   p_arrows <- ggplot(arrow_data, aes(x = pred_lon, y = obs)) +
@@ -996,20 +1001,26 @@ for (resp in unique(cv_predictions_df$response_var)) {
 # plot: how each plot's prediction moves when the structural complexity
 # metrics are added to the base ALS metrics
 # same principle as the plot above, but the arrow now starts at the base ALS
-# prediction and points to the ALS + structural complexity prediction. 
+# prediction and points to the ALS + structural complexity prediction.
+# Where FFS selects the same variables with and without the structural metrics,
+# the predictions are identical and the plot does not move. Those ties are
+# excluded from the binomial test (equal is not closer, so counting them as
+# 'further' would produce a misleading 0% with a very small p-value).
 for (resp in unique(cv_predictions_df$response_var)) {
 
   arrow_data_struct <- cv_predictions_df %>%
-    dplyr::filter(response_var == resp, leaf_condition == 'leaf-off') %>%
-    dplyr::select(leaf_type, kspnr, obs, predictor_set, pred) %>%
+    dplyr::filter(response_var == resp) %>%
+    dplyr::select(leaf_condition, leaf_type, kspnr, obs, predictor_set, pred) %>%
     tidyr::pivot_wider(names_from = predictor_set, values_from = pred) %>%
     dplyr::filter(!is.na(base), !is.na(struct_comp)) %>%
     dplyr::mutate(
       pred_base   = base,
       pred_struct = struct_comp,
+      changed     = pred_struct != pred_base,
       direction = ifelse(abs(pred_struct - obs) < abs(pred_base - obs),
                          'closer to 1:1', 'further from 1:1'),
-      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous'))
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+      leaf_condition = factor(leaf_condition, levels = c('leaf-on', 'leaf-off'))
     )
 
   if (nrow(arrow_data_struct) == 0) next
@@ -1022,28 +1033,37 @@ for (resp in unique(cv_predictions_df$response_var)) {
   # share of plots that improve, per panel (for annotation)
   # the two-sided binomial test asks whether that share differs from 50%,
   # i.e. whether adding the structural metrics systematically helps on a
-  # per-plot basis
-  # p_adj applies the Holm correction over the three leaf types of this figure
+  # per-plot basis; only plots whose prediction actually changed are tested
+  # p_adj applies the Holm correction over the panels of this figure
   arrow_summary_struct <- arrow_data_struct %>%
-    dplyr::group_by(leaf_type) %>%
+    dplyr::group_by(leaf_condition, leaf_type) %>%
     dplyr::summarise(
       n_plots      = dplyr::n(),
-      n_closer     = sum(direction == 'closer to 1:1'),
-      share_closer = n_closer / n_plots * 100,
-      p_value      = stats::binom.test(n_closer, n_plots, p = 0.5)$p.value,
+      n_changed    = sum(changed),
+      n_closer     = sum(changed & direction == 'closer to 1:1'),
+      share_closer = ifelse(n_changed > 0, n_closer / n_changed * 100, NA_real_),
+      p_value      = if (n_changed > 0) {
+        stats::binom.test(n_closer, n_changed, p = 0.5)$p.value
+      } else NA_real_,
       .groups = 'drop'
     ) %>%
     dplyr::mutate(
-      p_adj = stats::p.adjust(p_value, method = 'holm'),
-      label = paste0(round(share_closer), '% closer (n = ', n_plots, ')\n',
-                     'p = ', format.pval(p_value, digits = 2, eps = 0.001),
-                     '\nHolm: ', format.pval(p_adj, digits = 2, eps = 0.001))
+      p_adj = stats::p.adjust(p_value, method = 'holm',
+                              n = max(sum(!is.na(p_value)), 1L)),
+      label = ifelse(
+        n_changed == 0,
+        paste0('no change (n = ', n_plots, ')'),
+        paste0(round(share_closer), '% closer (n = ', n_changed, ' changed)\n',
+               'p = ', format.pval(p_value, digits = 2, eps = 0.001),
+               '\nHolm: ', format.pval(p_adj, digits = 2, eps = 0.001))
+      )
     )
 
   p_arrows_struct <- ggplot(arrow_data_struct, aes(x = pred_base, y = obs)) +
     geom_abline(slope = 1, intercept = 0, linewidth = 0.8,
                 color = 'black', linetype = 'dashed') +
-    geom_segment(aes(xend = pred_struct, yend = obs, colour = direction),
+    geom_segment(data = dplyr::filter(arrow_data_struct, changed),
+                 aes(xend = pred_struct, yend = obs, colour = direction),
                  arrow = ggplot2::arrow(length = grid::unit(0.10, 'cm'),
                                         type = 'closed'),
                  linewidth = 0.4, alpha = 0.85) +
@@ -1053,13 +1073,13 @@ for (resp in unique(cv_predictions_df$response_var)) {
                   y = axis_max - (axis_max - axis_min) * 0.05,
                   label = label),
               hjust = 0, vjust = 1, size = 3, inherit.aes = FALSE) +
-    facet_wrap(~ leaf_type, nrow = 1) +
+    facet_grid(leaf_condition ~ leaf_type) +
     coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
     scale_colour_manual(
       values = c('closer to 1:1' = '#009E73', 'further from 1:1' = '#D55E00'),
       name = 'with structural complexity'
     ) +
-    labs(title = bquote('Effect of adding structural complexity (leaf-off):' ~
+    labs(title = bquote('Effect of adding structural complexity:' ~
                         .(forest_inv_names[resp]) ~
                         '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
          subtitle = 'arrow start = base ALS prediction, arrow head = ALS + structural complexity prediction',
@@ -1078,7 +1098,7 @@ for (resp in unique(cv_predictions_df$response_var)) {
   ggplot2::ggsave(
     filename = file.path(output_dir,
                          paste0('pred_shift_base_to_struct_comp_', resp, '.pdf')),
-    plot = p_arrows_struct, width = 10, height = 4.5
+    plot = p_arrows_struct, width = 10, height = 8
   )
 }
 
