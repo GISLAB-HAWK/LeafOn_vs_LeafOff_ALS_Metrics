@@ -1,11 +1,15 @@
 #-------------------------------------------------------------------------------
 # Name:         model_train.R
-# Description:  Script trains random forest models for predicting
-#               growing stock volume (GSV) (m³/ha).
+# Description:  Script trains random forest models for predicting forest
+#               inventory attributes: above-ground biomass (agb_ha, Mg/ha)
+#               and stem density (tree_density, n/ha).
 #               ALS-based metrics previously derived in forest inventory plots
-#               (BI plots) are used as predictors. Two models are trained,
-#               one using the the metrics calculated from leaf-on dataset,
-#               and one using the metrics calculated from leaf-off dataset.
+#               (BI plots) are used as predictors, once with the base ALS
+#               metrics only and once with the structural complexity metrics
+#               added, to quantify whether the latter are worth including.
+#               Two models are trained per combination, one using the metrics
+#               calculated from the leaf-on dataset, and one using the metrics
+#               calculated from the leaf-off dataset.
 #               Nearest Neighbour Distance Matching (NNDM)
 #               Leave-One-Out Cross Validation (LOO CV) is used as a
 #               spatial map validation method.
@@ -340,10 +344,19 @@ stopifnot(names(plot_metrics_lon)[predictor_start_col] == 'mean')
 structural_cols <- c('box_dimension', 'vci', 'rumple',
                      'enl_richness', 'enl_shannon', 'enl_simpson')
 
-# response variable(s) and tuning grid
+# response variables: AGB and stem density
 response_vars <- list(
-  list(name = 'agb_ha', col = 'agb_ha')
+  list(name = 'agb_ha',       col = 'agb_ha'),
+  list(name = 'tree_density', col = 'tree_density')
 )
+
+# fail fast if a response column is missing or incomplete
+for (resp in response_vars) {
+  stopifnot(resp$col %in% names(plot_metrics_lon))
+  if (any(is.na(sf::st_drop_geometry(plot_metrics_lon)[[resp$col]]))) {
+    warning('NA values in response variable: ', resp$col)
+  }
+}
 
 # the 6 datasets, built with the full predictor set (including the structural
 # complexity metrics); part 04's base set drops the structural columns below.
