@@ -383,7 +383,7 @@ bi_points_trees <- bi_points_trees %>%
     total_vol_ha = sum(total_vol * nha),
     merch_vol_ha = sum(merch_vol * nha),
     agb_ha = sum(agb * nha) / 1000,
-    tree_density = mean(nha),
+    tree_density = sum(nha, na.rm = T),
     basal_area_tree = (pi / 4) * (bhd / 100)^2,
     basal_area_ha = sum(basal_area_tree * nha, na.rm = T),
     dg = sqrt(sum(bhd^2 * nha, na.rm = T) / sum(nha, na.rm = T)),
