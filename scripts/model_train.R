@@ -604,6 +604,105 @@ write.csv(
 
 
 
+# 04c: seed-stability check (diagnostic, run on demand)
+#-------------------------------------------------------------------------------
+
+# FFS is a greedy search scored on a noisy NNDM CV estimate, so which variables
+# are selected can depend on the random seed. This block re-fits selected models
+# over several seeds to check whether (a) the selected variables and (b) the CV
+# performance are stable.
+#
+# It is gated behind run_seed_stability because it re-trains each target model
+# many times and is therefore slow; set to TRUE to run it.
+run_seed_stability <- TRUE
+
+if (run_seed_stability) {
+
+  # seeds to test
+  stability_seeds <- 1:10
+
+  # target models to check: every model in which FFS selected a structural
+  # complexity metric (box_dimension, vci, rumple, enl_*), so the check covers
+  # all cases where a specific structural metric is reported as selected.
+  # ('base' -> training_data_base, 'struct_comp' -> training_data_struct_comp)
+  stability_targets <- list(
+    # AGB (structural metric selected only in leaf-off)
+    list(resp = 'agb_ha',       dataset = 'loff_all',        predictor_set = 'struct_comp'),
+    list(resp = 'agb_ha',       dataset = 'loff_deciduous',  predictor_set = 'struct_comp'),
+    list(resp = 'agb_ha',       dataset = 'loff_coniferous', predictor_set = 'struct_comp'),
+    # tree density (structural metric selected in both seasons except loff coniferous)
+    list(resp = 'tree_density', dataset = 'lon_all',         predictor_set = 'struct_comp'),
+    list(resp = 'tree_density', dataset = 'lon_deciduous',   predictor_set = 'struct_comp'),
+    list(resp = 'tree_density', dataset = 'lon_coniferous',  predictor_set = 'struct_comp'),
+    list(resp = 'tree_density', dataset = 'loff_all',        predictor_set = 'struct_comp'),
+    list(resp = 'tree_density', dataset = 'loff_deciduous',  predictor_set = 'struct_comp')
+  )
+
+  # refit one model over all seeds and return per-seed variables and metrics
+  check_seed_stability <- function(resp, dataset, predictor_set, seeds) {
+
+    td   <- if (predictor_set == 'base') training_data_base else training_data_struct_comp
+    pred <- td[[dataset]]$predictors
+    y    <- sf::st_drop_geometry(td[[dataset]]$data[[resp]])
+    ctrl <- train_controls[[dataset]]
+
+    do.call(rbind, lapply(seeds, function(s) {
+      m  <- CAST::ffs(
+        pred, y, method = 'ranger', trControl = ctrl, tuneGrid = tgrid,
+        num.trees = 100, importance = 'permutation', seed = s
+      )
+      d  <- m$pred                       # pooled NNDM CV predictions
+      se <- (d$pred - d$obs)^2
+      data.frame(
+        resp = resp, dataset = dataset, predictor_set = predictor_set, seed = s,
+        n_selected = length(m$selectedvars),
+        vars = paste(sort(m$selectedvars), collapse = ', '),
+        RMSE = sqrt(mean(se)),
+        MAE  = mean(abs(d$pred - d$obs)),
+        R2   = 1 - sum(se) / sum((d$obs - mean(d$obs))^2),
+        row.names = NULL
+      )
+    }))
+  }
+
+  # run the check for every target
+  stability_results <- do.call(rbind, lapply(stability_targets, function(t) {
+    message(paste0('Seed-stability: ', t$resp, ' / ', t$dataset, ' / ', t$predictor_set))
+    check_seed_stability(t$resp, t$dataset, t$predictor_set, stability_seeds)
+  }))
+
+  # per-target summary: variable-selection frequency and metric spread
+  for (t in stability_targets) {
+    sub <- stability_results[
+      stability_results$resp == t$resp &
+      stability_results$dataset == t$dataset &
+      stability_results$predictor_set == t$predictor_set, ]
+
+    cat('\n---', t$resp, '/', t$dataset, '/', t$predictor_set,
+        '(n seeds =', nrow(sub), ') ---\n')
+
+    # how often is each variable selected across seeds
+    cat('variable selection frequency:\n')
+    print(sort(table(unlist(strsplit(sub$vars, ', '))), decreasing = TRUE))
+
+    # spread of each metric across seeds
+    cat('metric spread (mean / sd / range):\n')
+    print(round(sapply(sub[, c('RMSE', 'MAE', 'R2')],
+                       function(x) c(mean = mean(x), sd = sd(x),
+                                     range = diff(range(x)))), 3))
+  }
+
+  # store the full per-seed table
+  write.csv(
+    stability_results,
+    file.path(output_dir, 'seed_stability_results.csv'),
+    row.names = F
+  )
+
+}
+
+
+
 # 05: validation
 #-------------------------------------------------------------------------------
 
