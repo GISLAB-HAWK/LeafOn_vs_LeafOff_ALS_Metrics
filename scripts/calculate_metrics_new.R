@@ -126,7 +126,7 @@ head(pc_loff_metrics)
 #-------------------------------------------------------------------------------
 
 # response variables (forest inventory attributes)
-response_vars <- c('agb_ha')
+response_vars <- c('agb_ha', 'tree_density')
 # response_vars <- c('agb_ha', 'total_vol_ha', 'merch_vol_ha',
 #                    'tree_density', 'basal_area_ha', 'dg')
 

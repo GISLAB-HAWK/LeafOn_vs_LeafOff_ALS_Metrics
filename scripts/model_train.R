@@ -1,11 +1,15 @@
 #-------------------------------------------------------------------------------
 # Name:         model_train.R
-# Description:  Script trains random forest models for predicting
-#               growing stock volume (GSV) (m³/ha).
+# Description:  Script trains random forest models for predicting forest
+#               inventory attributes: above-ground biomass (agb_ha, Mg/ha)
+#               and stem density (tree_density, n/ha).
 #               ALS-based metrics previously derived in forest inventory plots
-#               (BI plots) are used as predictors. Two models are trained,
-#               one using the the metrics calculated from leaf-on dataset,
-#               and one using the metrics calculated from leaf-off dataset.
+#               (BI plots) are used as predictors, once with the base ALS
+#               metrics only and once with the structural complexity metrics
+#               added, to quantify whether the latter are worth including.
+#               Two models are trained per combination, one using the metrics
+#               calculated from the leaf-on dataset, and one using the metrics
+#               calculated from the leaf-off dataset.
 #               Nearest Neighbour Distance Matching (NNDM)
 #               Leave-One-Out Cross Validation (LOO CV) is used as a
 #               spatial map validation method.
@@ -340,10 +344,19 @@ stopifnot(names(plot_metrics_lon)[predictor_start_col] == 'mean')
 structural_cols <- c('box_dimension', 'vci', 'rumple',
                      'enl_richness', 'enl_shannon', 'enl_simpson')
 
-# response variable(s) and tuning grid
+# response variables: AGB and stem density
 response_vars <- list(
-  list(name = 'agb_ha', col = 'agb_ha')
+  list(name = 'agb_ha',       col = 'agb_ha'),
+  list(name = 'tree_density', col = 'tree_density')
 )
+
+# fail fast if a response column is missing or incomplete
+for (resp in response_vars) {
+  stopifnot(resp$col %in% names(plot_metrics_lon))
+  if (any(is.na(sf::st_drop_geometry(plot_metrics_lon)[[resp$col]]))) {
+    warning('NA values in response variable: ', resp$col)
+  }
+}
 
 # the 6 datasets, built with the full predictor set (including the structural
 # complexity metrics); part 04's base set drops the structural columns below.
@@ -588,6 +601,105 @@ write.csv(
   file.path(output_dir, 'model_comparison_base_vs_struct_comp.csv'),
   row.names = F
 )
+
+
+
+# 04c: seed-stability check (diagnostic, run on demand)
+#-------------------------------------------------------------------------------
+
+# FFS is a greedy search scored on a noisy NNDM CV estimate, so which variables
+# are selected can depend on the random seed. This block re-fits selected models
+# over several seeds to check whether (a) the selected variables and (b) the CV
+# performance are stable.
+#
+# It is gated behind run_seed_stability because it re-trains each target model
+# many times and is therefore slow; set to TRUE to run it.
+run_seed_stability <- TRUE
+
+if (run_seed_stability) {
+
+  # seeds to test
+  stability_seeds <- 1:10
+
+  # target models to check: every model in which FFS selected a structural
+  # complexity metric (box_dimension, vci, rumple, enl_*), so the check covers
+  # all cases where a specific structural metric is reported as selected.
+  # ('base' -> training_data_base, 'struct_comp' -> training_data_struct_comp)
+  stability_targets <- list(
+    # AGB (structural metric selected only in leaf-off)
+    list(resp = 'agb_ha',       dataset = 'loff_all',        predictor_set = 'struct_comp'),
+    list(resp = 'agb_ha',       dataset = 'loff_deciduous',  predictor_set = 'struct_comp'),
+    list(resp = 'agb_ha',       dataset = 'loff_coniferous', predictor_set = 'struct_comp'),
+    # tree density (structural metric selected in both seasons except loff coniferous)
+    list(resp = 'tree_density', dataset = 'lon_all',         predictor_set = 'struct_comp'),
+    list(resp = 'tree_density', dataset = 'lon_deciduous',   predictor_set = 'struct_comp'),
+    list(resp = 'tree_density', dataset = 'lon_coniferous',  predictor_set = 'struct_comp'),
+    list(resp = 'tree_density', dataset = 'loff_all',        predictor_set = 'struct_comp'),
+    list(resp = 'tree_density', dataset = 'loff_deciduous',  predictor_set = 'struct_comp')
+  )
+
+  # refit one model over all seeds and return per-seed variables and metrics
+  check_seed_stability <- function(resp, dataset, predictor_set, seeds) {
+
+    td   <- if (predictor_set == 'base') training_data_base else training_data_struct_comp
+    pred <- td[[dataset]]$predictors
+    y    <- sf::st_drop_geometry(td[[dataset]]$data[[resp]])
+    ctrl <- train_controls[[dataset]]
+
+    do.call(rbind, lapply(seeds, function(s) {
+      m  <- CAST::ffs(
+        pred, y, method = 'ranger', trControl = ctrl, tuneGrid = tgrid,
+        num.trees = 100, importance = 'permutation', seed = s
+      )
+      d  <- m$pred                       # pooled NNDM CV predictions
+      se <- (d$pred - d$obs)^2
+      data.frame(
+        resp = resp, dataset = dataset, predictor_set = predictor_set, seed = s,
+        n_selected = length(m$selectedvars),
+        vars = paste(sort(m$selectedvars), collapse = ', '),
+        RMSE = sqrt(mean(se)),
+        MAE  = mean(abs(d$pred - d$obs)),
+        R2   = 1 - sum(se) / sum((d$obs - mean(d$obs))^2),
+        row.names = NULL
+      )
+    }))
+  }
+
+  # run the check for every target
+  stability_results <- do.call(rbind, lapply(stability_targets, function(t) {
+    message(paste0('Seed-stability: ', t$resp, ' / ', t$dataset, ' / ', t$predictor_set))
+    check_seed_stability(t$resp, t$dataset, t$predictor_set, stability_seeds)
+  }))
+
+  # per-target summary: variable-selection frequency and metric spread
+  for (t in stability_targets) {
+    sub <- stability_results[
+      stability_results$resp == t$resp &
+      stability_results$dataset == t$dataset &
+      stability_results$predictor_set == t$predictor_set, ]
+
+    cat('\n---', t$resp, '/', t$dataset, '/', t$predictor_set,
+        '(n seeds =', nrow(sub), ') ---\n')
+
+    # how often is each variable selected across seeds
+    cat('variable selection frequency:\n')
+    print(sort(table(unlist(strsplit(sub$vars, ', '))), decreasing = TRUE))
+
+    # spread of each metric across seeds
+    cat('metric spread (mean / sd / range):\n')
+    print(round(sapply(sub[, c('RMSE', 'MAE', 'R2')],
+                       function(x) c(mean = mean(x), sd = sd(x),
+                                     range = diff(range(x)))), 3))
+  }
+
+  # store the full per-seed table
+  write.csv(
+    stability_results,
+    file.path(output_dir, 'seed_stability_results.csv'),
+    row.names = F
+  )
+
+}
 
 
 
@@ -925,6 +1037,9 @@ for (resp in unique(cv_predictions_df$response_var)) {
   # share of plots that improve, per panel (for annotation)
   # the two-sided binomial test asks whether that share differs from 50%,
   # i.e. whether either season is systematically better on a per-plot basis
+  # p_adj applies the Holm correction over the six panels of this figure
+  # (2 predictor sets x 3 leaf types); it is applied unconditionally, so the
+  # correction does not depend on which raw p-values happen to be small
   arrow_summary <- arrow_data %>%
     dplyr::group_by(predictor_set, leaf_type) %>%
     dplyr::summarise(
@@ -935,8 +1050,10 @@ for (resp in unique(cv_predictions_df$response_var)) {
       .groups = 'drop'
     ) %>%
     dplyr::mutate(
+      p_adj = stats::p.adjust(p_value, method = 'holm'),
       label = paste0(round(share_closer), '% closer (n = ', n_plots, ')\n',
-                     'p = ', format.pval(p_value, digits = 2, eps = 0.001))
+                     'p = ', format.pval(p_value, digits = 2, eps = 0.001),
+                     '\nHolm: ', format.pval(p_adj, digits = 2, eps = 0.001))
     )
 
   p_arrows <- ggplot(arrow_data, aes(x = pred_lon, y = obs)) +
@@ -983,20 +1100,26 @@ for (resp in unique(cv_predictions_df$response_var)) {
 # plot: how each plot's prediction moves when the structural complexity
 # metrics are added to the base ALS metrics
 # same principle as the plot above, but the arrow now starts at the base ALS
-# prediction and points to the ALS + structural complexity prediction. 
+# prediction and points to the ALS + structural complexity prediction.
+# Where FFS selects the same variables with and without the structural metrics,
+# the predictions are identical and the plot does not move. Those ties are
+# excluded from the binomial test (equal is not closer, so counting them as
+# 'further' would produce a misleading 0% with a very small p-value).
 for (resp in unique(cv_predictions_df$response_var)) {
 
   arrow_data_struct <- cv_predictions_df %>%
-    dplyr::filter(response_var == resp, leaf_condition == 'leaf-off') %>%
-    dplyr::select(leaf_type, kspnr, obs, predictor_set, pred) %>%
+    dplyr::filter(response_var == resp) %>%
+    dplyr::select(leaf_condition, leaf_type, kspnr, obs, predictor_set, pred) %>%
     tidyr::pivot_wider(names_from = predictor_set, values_from = pred) %>%
     dplyr::filter(!is.na(base), !is.na(struct_comp)) %>%
     dplyr::mutate(
       pred_base   = base,
       pred_struct = struct_comp,
+      changed     = pred_struct != pred_base,
       direction = ifelse(abs(pred_struct - obs) < abs(pred_base - obs),
                          'closer to 1:1', 'further from 1:1'),
-      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous'))
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+      leaf_condition = factor(leaf_condition, levels = c('leaf-on', 'leaf-off'))
     )
 
   if (nrow(arrow_data_struct) == 0) next
@@ -1009,28 +1132,37 @@ for (resp in unique(cv_predictions_df$response_var)) {
   # share of plots that improve, per panel (for annotation)
   # the two-sided binomial test asks whether that share differs from 50%,
   # i.e. whether adding the structural metrics systematically helps on a
-  # per-plot basis
-  # p_adj applies the Holm correction over the three leaf types of this figure
+  # per-plot basis; only plots whose prediction actually changed are tested
+  # p_adj applies the Holm correction over the panels of this figure
   arrow_summary_struct <- arrow_data_struct %>%
-    dplyr::group_by(leaf_type) %>%
+    dplyr::group_by(leaf_condition, leaf_type) %>%
     dplyr::summarise(
       n_plots      = dplyr::n(),
-      n_closer     = sum(direction == 'closer to 1:1'),
-      share_closer = n_closer / n_plots * 100,
-      p_value      = stats::binom.test(n_closer, n_plots, p = 0.5)$p.value,
+      n_changed    = sum(changed),
+      n_closer     = sum(changed & direction == 'closer to 1:1'),
+      share_closer = ifelse(n_changed > 0, n_closer / n_changed * 100, NA_real_),
+      p_value      = if (n_changed > 0) {
+        stats::binom.test(n_closer, n_changed, p = 0.5)$p.value
+      } else NA_real_,
       .groups = 'drop'
     ) %>%
     dplyr::mutate(
-      p_adj = stats::p.adjust(p_value, method = 'holm'),
-      label = paste0(round(share_closer), '% closer (n = ', n_plots, ')\n',
-                     'p = ', format.pval(p_value, digits = 2, eps = 0.001),
-                     '\nHolm: ', format.pval(p_adj, digits = 2, eps = 0.001))
+      p_adj = stats::p.adjust(p_value, method = 'holm',
+                              n = max(sum(!is.na(p_value)), 1L)),
+      label = ifelse(
+        n_changed == 0,
+        paste0('no change (n = ', n_plots, ')'),
+        paste0(round(share_closer), '% closer (n = ', n_changed, ' changed)\n',
+               'p = ', format.pval(p_value, digits = 2, eps = 0.001),
+               '\nHolm: ', format.pval(p_adj, digits = 2, eps = 0.001))
+      )
     )
 
   p_arrows_struct <- ggplot(arrow_data_struct, aes(x = pred_base, y = obs)) +
     geom_abline(slope = 1, intercept = 0, linewidth = 0.8,
                 color = 'black', linetype = 'dashed') +
-    geom_segment(aes(xend = pred_struct, yend = obs, colour = direction),
+    geom_segment(data = dplyr::filter(arrow_data_struct, changed),
+                 aes(xend = pred_struct, yend = obs, colour = direction),
                  arrow = ggplot2::arrow(length = grid::unit(0.10, 'cm'),
                                         type = 'closed'),
                  linewidth = 0.4, alpha = 0.85) +
@@ -1040,13 +1172,13 @@ for (resp in unique(cv_predictions_df$response_var)) {
                   y = axis_max - (axis_max - axis_min) * 0.05,
                   label = label),
               hjust = 0, vjust = 1, size = 3, inherit.aes = FALSE) +
-    facet_wrap(~ leaf_type, nrow = 1) +
+    facet_grid(leaf_condition ~ leaf_type) +
     coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
     scale_colour_manual(
       values = c('closer to 1:1' = '#009E73', 'further from 1:1' = '#D55E00'),
       name = 'with structural complexity'
     ) +
-    labs(title = bquote('Effect of adding structural complexity (leaf-off):' ~
+    labs(title = bquote('Effect of adding structural complexity:' ~
                         .(forest_inv_names[resp]) ~
                         '[' * .(parse(text = forest_inv_units[resp])[[1]]) * ']'),
          subtitle = 'arrow start = base ALS prediction, arrow head = ALS + structural complexity prediction',
@@ -1065,7 +1197,7 @@ for (resp in unique(cv_predictions_df$response_var)) {
   ggplot2::ggsave(
     filename = file.path(output_dir,
                          paste0('pred_shift_base_to_struct_comp_', resp, '.pdf')),
-    plot = p_arrows_struct, width = 10, height = 4.5
+    plot = p_arrows_struct, width = 10, height = 8
   )
 }
 
