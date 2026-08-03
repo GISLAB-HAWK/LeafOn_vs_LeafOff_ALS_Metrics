@@ -193,7 +193,7 @@ load_packages(
   c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2',
     'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST',
     'parallel', 'doParallel', 'ranger', 'exactextractr',
-    'data.table', 'geometry', 'future'),
+    'data.table', 'geometry', 'future', 'ggpattern', 'patchwork'),
   github_remotes = c(
     TreeGrOSSinR = 'rnuske/TreeGrOSSinR',
     ForestGapR = 'carlos-alberto-silva/ForestGapR'
