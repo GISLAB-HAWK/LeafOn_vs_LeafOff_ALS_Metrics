@@ -614,7 +614,7 @@ write.csv(
 #
 # It is gated behind run_seed_stability because it re-trains each target model
 # many times and is therefore slow; set to TRUE to run it.
-run_seed_stability <- TRUE
+run_seed_stability <- FALSE
 
 if (run_seed_stability) {
 
@@ -1206,12 +1206,17 @@ for (resp in unique(cv_predictions_df$response_var)) {
 # 06: model transferability
 #-------------------------------------------------------------------------------
 
+# cross-seasonal transferability is assessed for both attributes (AGB and
+# stem density) and both predictor sets (base ALS vs. ALS + structural
+# complexity), to test whether adding the structural metrics makes the models
+# more or less transferable between the leaf-on and leaf-off acquisition
+
 # leaf types
 leaf_types <- c('all', 'deciduous', 'coniferous')
 
 # leaf-on / leaf-off data frames (predictors + response) per leaf type
 transfer_data <- list(
-  all        = list(lon_df = plots_lon_all_df, 
+  all        = list(lon_df = plots_lon_all_df,
                     loff_df = plots_loff_all_df),
   deciduous  = list(lon_df = plots_lon_deciduous_df,
                     loff_df = plots_loff_deciduous_df),
@@ -1219,59 +1224,81 @@ transfer_data <- list(
                     loff_df = plots_loff_coniferous_df)
 )
 
-# store transferability predictions for all response variables and leaf types
+# the two predictor sets, with their model list, model-name prefix and cached
+# native CV predictions (from part 05)
+predictor_sets <- list(
+  base = list(
+    models = ffs_models_base,
+    prefix = 'ffs_rf_base_',
+    cv     = cv_predictions_base
+  ),
+  struct_comp = list(
+    models = ffs_models_struct_comp,
+    prefix = 'ffs_rf_struct_comp_',
+    cv     = cv_predictions_struct_comp
+  )
+)
+
+# store transferability predictions for all predictor sets, responses, leaf types
 transfer_predictions <- list()
 
-for (resp in response_vars) {
-  for (lt in leaf_types) {
+for (ps_name in names(predictor_sets)) {
 
-    lon_model_name  <- paste0('ffs_rf_', resp$name, '_lon_', lt)
-    loff_model_name <- paste0('ffs_rf_', resp$name, '_loff_', lt)
+  ps <- predictor_sets[[ps_name]]
 
-    # check that both models exist
-    if (!lon_model_name %in% names(ffs_models) | !loff_model_name %in% names(ffs_models)) {
-      message(paste0('Skipping ', resp$name, ' / ', lt, ': model(s) not found'))
-      next
+  for (resp in response_vars) {
+    for (lt in leaf_types) {
+
+      lon_model_name  <- paste0(ps$prefix, resp$name, '_lon_', lt)
+      loff_model_name <- paste0(ps$prefix, resp$name, '_loff_', lt)
+
+      # check that both models exist
+      if (!lon_model_name %in% names(ps$models) | !loff_model_name %in% names(ps$models)) {
+        message(paste0('Skipping ', ps_name, ' / ', resp$name, ' / ', lt, ': model(s) not found'))
+        next
+      }
+
+      lon_model  <- ps$models[[lon_model_name]]
+      loff_model <- ps$models[[loff_model_name]]
+
+      # predictor data frames for this leaf type
+      lon_df  <- transfer_data[[lt]]$lon_df
+      loff_df <- transfer_data[[lt]]$loff_df
+
+      # 1) + 2) native performance from the NNDM LOO CV predictions (part 05)
+      cv_lon  <- ps$cv[[paste0('pred_', resp$name, '_lon_', lt)]]  %>% sf::st_drop_geometry()
+      cv_loff <- ps$cv[[paste0('pred_', resp$name, '_loff_', lt)]] %>% sf::st_drop_geometry()
+
+      # 3) leaf-on model applied to leaf-off data (transfer)
+      # subset the target data to the model's selected variables, so a base
+      # model is never handed the structural columns it was not trained on
+      obs_loff         <- loff_df[[resp$col]]
+      pred_lon_on_loff <- stats::predict(lon_model, loff_df[, lon_model$selectedvars, drop = F])
+
+      # 4) leaf-off model applied to leaf-on data (transfer)
+      obs_lon          <- lon_df[[resp$col]]
+      pred_loff_on_lon <- stats::predict(loff_model, lon_df[, loff_model$selectedvars, drop = F])
+
+      # combine the four scenarios into one data frame
+      # source = which model produced the prediction (used to pair a transfer
+      # scenario with its native counterpart when computing the transfer gap)
+      transfer_df <- rbind(
+        data.frame(predictor_set = ps_name, response = resp$name, leaf_type = lt,
+                   source = 'lon',  scenario = 'lon model -> lon data',
+                   type = 'native (CV)', obs = cv_lon$obs,  pred = cv_lon$pred),
+        data.frame(predictor_set = ps_name, response = resp$name, leaf_type = lt,
+                   source = 'loff', scenario = 'loff model -> loff data',
+                   type = 'native (CV)', obs = cv_loff$obs, pred = cv_loff$pred),
+        data.frame(predictor_set = ps_name, response = resp$name, leaf_type = lt,
+                   source = 'lon',  scenario = 'lon model -> loff data',
+                   type = 'transfer', obs = obs_loff, pred = pred_lon_on_loff),
+        data.frame(predictor_set = ps_name, response = resp$name, leaf_type = lt,
+                   source = 'loff', scenario = 'loff model -> lon data',
+                   type = 'transfer', obs = obs_lon, pred = pred_loff_on_lon)
+      )
+
+      transfer_predictions[[paste0(ps_name, '_', resp$name, '_', lt)]] <- transfer_df
     }
-
-    lon_model  <- ffs_models[[lon_model_name]]
-    loff_model <- ffs_models[[loff_model_name]]
-
-    # predictor data frames for this leaf type
-    lon_df  <- transfer_data[[lt]]$lon_df
-    loff_df <- transfer_data[[lt]]$loff_df
-    preds_lon  <- lon_df[, predictor_start_col:ncol(lon_df)]
-    preds_loff <- loff_df[, predictor_start_col:ncol(loff_df)]
-
-    # 1) + 2) native performance from NNDM LOO CV predictions
-    cv_lon  <- cv_predictions[[paste0('pred_', resp$name, '_lon_', lt)]]  %>% sf::st_drop_geometry()
-    cv_loff <- cv_predictions[[paste0('pred_', resp$name, '_loff_', lt)]] %>% sf::st_drop_geometry()
-
-    # 3) leaf-on model applied to leaf-off data (transfer)
-    obs_loff         <- loff_df[[resp$col]]
-    pred_lon_on_loff <- stats::predict(lon_model, preds_loff)
-
-    # 4) leaf-off model applied to leaf-on data (transfer)
-    obs_lon          <- lon_df[[resp$col]]
-    pred_loff_on_lon <- stats::predict(loff_model, preds_lon)
-
-    # combine the four scenarios into one data frame
-    transfer_df <- rbind(
-      data.frame(response = resp$name, leaf_type = lt,
-                 scenario = 'lon model -> lon data',   type = 'native (CV)',
-                 obs = cv_lon$obs,  pred = cv_lon$pred),
-      data.frame(response = resp$name, leaf_type = lt,
-                 scenario = 'loff model -> loff data', type = 'native (CV)',
-                 obs = cv_loff$obs, pred = cv_loff$pred),
-      data.frame(response = resp$name, leaf_type = lt,
-                 scenario = 'lon model -> loff data',  type = 'transfer',
-                 obs = obs_loff,    pred = pred_lon_on_loff),
-      data.frame(response = resp$name, leaf_type = lt,
-                 scenario = 'loff model -> lon data',  type = 'transfer',
-                 obs = obs_lon,     pred = pred_loff_on_lon)
-    )
-
-    transfer_predictions[[paste0(resp$name, '_', lt)]] <- transfer_df
   }
 }
 
@@ -1280,7 +1307,7 @@ scenario_predictions <- dplyr::bind_rows(transfer_predictions)
 
 # calculate error metrics for all combinations
 transfer_metrics <- scenario_predictions %>%
-  dplyr::group_by(response, leaf_type, scenario, type) %>%
+  dplyr::group_by(predictor_set, response, leaf_type, source, scenario, type) %>%
   dplyr::summarise(
     n = dplyr::n(),
     RMSE = sqrt(mean((pred - obs)^2, na.rm = T)),
@@ -1293,9 +1320,10 @@ transfer_metrics <- scenario_predictions %>%
     .groups = 'drop'
   )
 
-# order rows: per leaf type, native scenarios first, then transfer scenarios
+# order rows: per predictor set / response / leaf type, native first, then transfer
 transfer_metrics <- transfer_metrics %>%
   dplyr::arrange(
+    factor(predictor_set, levels = c('base', 'struct_comp')),
     response,
     factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
     factor(scenario, levels = c('lon model -> lon data', 'loff model -> loff data',
@@ -1304,10 +1332,10 @@ transfer_metrics <- transfer_metrics %>%
 
 # display full results table
 transfer_metrics %>%
-  dplyr::select(response, leaf_type, scenario, type,
+  dplyr::select(predictor_set, response, leaf_type, scenario, type,
                 n, RMSE, rel_RMSE, R2, MAE, bias, rel_bias) %>%
   knitr::kable(digits = 2,
-               caption = 'Transferability: 4 scenarios per leaf type')
+               caption = 'Transferability: 4 scenarios per predictor set / response / leaf type')
 
 # store the metrics table
 write.csv(
@@ -1316,79 +1344,235 @@ write.csv(
   row.names = F
 )
 
-# prepare plotting data
-transfer_plot_data <- transfer_metrics %>%
+# the transfer gap measures how much a model degrades when applied to the other
+# season, relative to its own native performance
+# For each model (identified by its source season) it pairs the transfer scenario
+# with the native scenario: gap = rel_RMSE(transfer) - rel_RMSE(native)
+# A larger gap means the model transfers worse. Comparing the gap between the
+# base and the structural-complexity predictor set shows whether the structural
+# metrics make the models more (smaller gap) or less (larger gap) transferable
+transfer_gap <- transfer_metrics %>%
+  dplyr::select(predictor_set, response, leaf_type, source, type, rel_RMSE, R2) %>%
+  tidyr::pivot_wider(names_from = type, values_from = c(rel_RMSE, R2)) %>%
+  dplyr::rename(
+    rel_RMSE_native = `rel_RMSE_native (CV)`,
+    R2_native       = `R2_native (CV)`
+  ) %>%
   dplyr::mutate(
-    leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
-    scenario_label = factor(scenario,
-      levels = c('lon model -> lon data', 'loff model -> loff data',
-                 'lon model -> loff data', 'loff model -> lon data'),
-      labels = c('leaf-on -> leaf-on', 'leaf-off -> leaf-off',
-                 'leaf-on -> leaf-off', 'leaf-off -> leaf-on'))
+    gap_rel_RMSE = rel_RMSE_transfer - rel_RMSE_native,
+    gap_R2       = R2_native - R2_transfer
   )
 
+# compare the gap between the two predictor sets, side by side
+transfer_gap_comparison <- transfer_gap %>%
+  dplyr::select(response, leaf_type, source, predictor_set, gap_rel_RMSE, gap_R2) %>%
+  tidyr::pivot_wider(names_from = predictor_set,
+                     values_from = c(gap_rel_RMSE, gap_R2)) %>%
+  dplyr::mutate(
+    # positive delta_gap = structural metrics transfer WORSE than base
+    delta_gap_rel_RMSE = gap_rel_RMSE_struct_comp - gap_rel_RMSE_base,
+    delta_gap_R2       = gap_R2_struct_comp - gap_R2_base
+  ) %>%
+  dplyr::arrange(response,
+                 factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+                 source)
+
+transfer_gap_comparison %>%
+  knitr::kable(digits = 2,
+               caption = 'Transferability gap: base vs. ALS + structural complexity (rel_RMSE transfer - native)')
+
+write.csv(
+  transfer_gap_comparison,
+  file.path(output_dir, 'model_transferability_gap_comparison.csv'),
+  row.names = F
+)
+
+# common scenario labels and colours
+scenario_levels <- c('lon model -> lon data', 'loff model -> loff data',
+                     'lon model -> loff data', 'loff model -> lon data')
+scenario_labels <- c('leaf-on -> leaf-on', 'leaf-off -> leaf-off',
+                    'leaf-on -> leaf-off', 'leaf-off -> leaf-on')
+
 scenario_cols <- c(
-  'leaf-on -> leaf-on'   = '#009E73',
-  'leaf-off -> leaf-off' = '#E69F00',
-  'leaf-on -> leaf-off'  = '#80CEB9',
-  'leaf-off -> leaf-on'  = '#F2CF80'
+  'leaf-on -> leaf-on'   = 'gray40',   # leaf-on model, native (solid)
+  'leaf-off -> leaf-off' = 'gray70',   # leaf-off model, native (solid)
+  'leaf-on -> leaf-off'  = 'white',    # leaf-on model, transfer (striped)
+  'leaf-off -> leaf-on'  = 'white'     # leaf-off model, transfer (striped)
 )
 
-# plot: relative RMSE per leaf type and scenario
-p_transfer_rmse <- ggplot(transfer_plot_data,
-       aes(x = leaf_type, y = rel_RMSE, fill = scenario_label)) +
-  geom_col(position = position_dodge(width = 0.85), width = 0.75) +
-  geom_text(aes(label = round(rel_RMSE, 1)),
-            position = position_dodge(width = 0.85), vjust = -0.5, size = 2.5) +
-  scale_fill_manual(values = scenario_cols, name = '') +
-  labs(x = '', y = 'Relative RMSE (%)') +
-  theme_bw() +
-  theme(panel.grid = element_blank(), legend.position = 'bottom')
-
-print(p_transfer_rmse)
-
-# plot: relative bias per leaf type and scenario
-p_transfer_bias <- ggplot(transfer_plot_data,
-       aes(x = leaf_type, y = rel_bias, fill = scenario_label)) +
-  geom_col(position = position_dodge(width = 0.85), width = 0.75) +
-  geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey40') +
-  geom_text(aes(label = round(rel_bias, 1),
-                vjust = ifelse(rel_bias >= 0, -0.5, 1.5)),
-            position = position_dodge(width = 0.85), size = 2.5) +
-  scale_fill_manual(values = scenario_cols, name = '') +
-  labs(x = '', y = 'Relative Bias (%)') +
-  theme_bw() +
-  theme(panel.grid = element_blank(), legend.position = 'bottom')
-
-print(p_transfer_bias)
-
-# save the two barplots
-ggplot2::ggsave(
-  filename = file.path(output_dir, 'transferability_rel_rmse.pdf'),
-  plot = p_transfer_rmse,
-  width = 9,
-  height = 6
+scenario_pattern <- c(
+  'leaf-on -> leaf-on'   = 'none',
+  'leaf-off -> leaf-off' = 'none',
+  'leaf-on -> leaf-off'  = 'stripe',
+  'leaf-off -> leaf-on'  = 'stripe'
 )
-ggplot2::ggsave(
-  filename = file.path(output_dir, 'transferability_rel_bias.pdf'),
-  plot = p_transfer_bias,
-  width = 9,
-  height = 6
+scenario_pattern_density <- c(
+  'leaf-on -> leaf-on'   = 0,
+  'leaf-off -> leaf-off' = 0,
+  'leaf-on -> leaf-off'  = 0.5, 
+  'leaf-off -> leaf-on'  = 0.15 
 )
+predictor_set_labels <- c('base' = 'base ALS',
+                          'struct_comp' = 'ALS + structural complexity')
 
-# plot: predicted vs observed for all scenarios,
-# faceted leaf type (rows) x scenario (columns)
+# relative RMSE per response: leaf type x scenario, faceted by predictor set,
+# so the transfer bars can be compared with and without structural metrics
+for (resp in unique(transfer_metrics$response)) {
+
+  pdat <- transfer_metrics %>%
+    dplyr::filter(response == resp) %>%
+    dplyr::mutate(
+      leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+      scenario_label = factor(scenario, levels = scenario_levels, labels = scenario_labels),
+      predictor_set = factor(predictor_set, levels = c('base', 'struct_comp'),
+                             labels = predictor_set_labels)
+    )
+
+  p_rmse <- ggplot(pdat, aes(x = leaf_type, y = rel_RMSE,
+                             fill = scenario_label,
+                             pattern = scenario_label,
+                             pattern_density = scenario_label)) +
+    ggpattern::geom_col_pattern(
+      position = position_dodge(width = 0.85), width = 0.75,
+      colour = 'black', linewidth = 0.15,
+      pattern_colour = 'black', pattern_fill = 'black',
+      pattern_angle = 45, pattern_spacing = 0.02,
+      pattern_key_scale_factor = 0.6
+    ) +
+    geom_text(aes(label = round(rel_RMSE, 1)),
+              position = position_dodge(width = 0.85), vjust = -0.5, size = 2) +
+    facet_wrap(~ predictor_set, ncol = 1) +
+    scale_fill_manual(values = scenario_cols, name = '') +
+    ggpattern::scale_pattern_manual(values = scenario_pattern, name = '') +
+    ggpattern::scale_pattern_density_manual(values = scenario_pattern_density, name = '') +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+    labs(title = paste0('Transferability - ', forest_inv_names[resp]),
+         x = '', y = 'Relative RMSE (%)') +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+          panel.grid = element_blank(), legend.position = 'bottom',
+          strip.background = element_rect(fill = 'lightgrey'),
+          strip.text = element_text(face = 'bold'))
+
+  print(p_rmse)
+
+  ggplot2::ggsave(
+    filename = file.path(output_dir, paste0('transferability_rel_rmse_', resp, '.pdf')),
+    plot = p_rmse, width = 9, height = 8
+  )
+
+  # same plot for R2
+  p_r2 <- ggplot(pdat, aes(x = leaf_type, y = R2,
+                           fill = scenario_label,
+                           pattern = scenario_label,
+                           pattern_density = scenario_label)) +
+    ggpattern::geom_col_pattern(
+      position = position_dodge(width = 0.85), width = 0.75,
+      colour = 'black', linewidth = 0.15,
+      pattern_colour = 'black', pattern_fill = 'black',
+      pattern_angle = 45, pattern_spacing = 0.02,
+      pattern_key_scale_factor = 0.6
+    ) +
+    geom_text(aes(label = round(R2, 2)),
+              position = position_dodge(width = 0.85), vjust = -0.4, size = 2) +
+    facet_wrap(~ predictor_set, ncol = 1) +
+    scale_fill_manual(values = scenario_cols, name = '') +
+    ggpattern::scale_pattern_manual(values = scenario_pattern, name = '') +
+    ggpattern::scale_pattern_density_manual(values = scenario_pattern_density, name = '') +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+    labs(title = paste0('Transferability - ', forest_inv_names[resp]),
+         x = '', y = expression(R^2)) +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+          panel.grid = element_blank(), legend.position = 'bottom',
+          strip.background = element_rect(fill = 'lightgrey'),
+          strip.text = element_text(face = 'bold'))
+
+  print(p_r2)
+
+  ggplot2::ggsave(
+    filename = file.path(output_dir, paste0('transferability_r2_', resp, '.pdf')),
+    plot = p_r2, width = 9, height = 8
+  )
+}
+
+# transferability gap per response: how much rel_RMSE increases on transfer,
+# base vs. structural complexity side by side
+gap_plot_data <- transfer_gap %>%
+  dplyr::mutate(
+    leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
+    predictor_set = factor(predictor_set, levels = c('base', 'struct_comp'),
+                           labels = predictor_set_labels),
+    direction = ifelse(source == 'lon', 'leaf-on -> leaf-off', 'leaf-off -> leaf-on')
+  )
+
+gap_predictor_cols <- c('base ALS' = '#0072B2',
+                        'ALS + structural complexity' = '#E69F00')
+
+one_gap_plot <- function(gdat, gap_col, y_lab, digits, axis_right = F) {
+  p <- ggplot(gdat, aes(x = leaf_type, y = .data[[gap_col]], fill = predictor_set)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7,
+             colour = 'black', linewidth = 0.15) +
+    geom_hline(yintercept = 0, linetype = 'dashed', colour = 'grey40') +
+    geom_text(aes(label = round(.data[[gap_col]], digits),
+                  vjust = ifelse(.data[[gap_col]] >= 0, -0.4, 1.3)),
+              position = position_dodge(width = 0.8), size = 2.5) +
+    facet_wrap(~ direction, ncol = 1) +
+    scale_fill_manual(values = gap_predictor_cols, name = '') +
+    labs(x = '', y = y_lab) +
+    theme_bw() +
+    theme(panel.grid = element_blank(),
+          strip.background = element_rect(fill = 'lightgrey'),
+          strip.text = element_text(face = 'bold'))
+  # left plot: axis on the left; right plot: axis on the right
+  if (axis_right) {
+    p + scale_y_continuous(position = 'right', expand = expansion(mult = c(0.12, 0.12)))
+  } else {
+    p + scale_y_continuous(expand = expansion(mult = c(0.12, 0.12)))
+  }
+}
+
+for (resp in unique(gap_plot_data$response)) {
+
+  gdat <- gap_plot_data %>% dplyr::filter(response == resp)
+
+  p_rmse <- one_gap_plot(gdat, 'gap_rel_RMSE',
+                         'rel. RMSE gap [%-points]', digits = 1, axis_right = F)
+  p_r2   <- one_gap_plot(gdat, 'gap_R2',
+                         expression(R^2 ~ 'gap'), digits = 2, axis_right = T)
+
+  p_gap <- (p_rmse | p_r2) +
+    patchwork::plot_layout(guides = 'collect') +
+    patchwork::plot_annotation(
+      title = paste0('Transferability gap - ', forest_inv_names[resp]),
+      subtitle = 'higher = transfers worse (transfer - native)',
+      theme = theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
+                    plot.subtitle = element_text(hjust = 0.5, size = 8))
+    ) &
+    theme(legend.position = 'bottom')
+
+  print(p_gap)
+
+  ggplot2::ggsave(
+    filename = file.path(output_dir, paste0('transferability_gap_', resp, '.pdf')),
+    plot = p_gap, width = 10, height = 7
+  )
+}
+
+# predicted vs. observed for all transfer scenarios, base ALS and ALS +
+# structural complexity overlaid in one figure per response
+pred_obs_cols   <- c('base ALS' = '#0072B2', 'ALS + structural complexity' = '#E69F00')
+pred_obs_shapes <- c('base ALS' = 16, 'ALS + structural complexity' = 17) 
+
 for (resp in unique(scenario_predictions$response)) {
 
   plot_data_transfer <- scenario_predictions %>%
     dplyr::filter(response == resp) %>%
     dplyr::mutate(
       leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
-      scenario_label = factor(scenario,
-        levels = c('lon model -> lon data', 'loff model -> loff data',
-                   'lon model -> loff data', 'loff model -> lon data'),
-        labels = c('leaf-on -> leaf-on', 'leaf-off -> leaf-off',
-                   'leaf-on -> leaf-off', 'leaf-off -> leaf-on'))
+      scenario_label = factor(scenario, levels = scenario_levels, labels = scenario_labels),
+      predictor_set = factor(predictor_set, levels = c('base', 'struct_comp'),
+                             labels = names(pred_obs_cols))
     )
 
   if (nrow(plot_data_transfer) == 0) next
@@ -1397,31 +1581,34 @@ for (resp in unique(scenario_predictions$response)) {
   axis_max <- max(c(plot_data_transfer$obs, plot_data_transfer$pred), na.rm = T)
   axis_min <- min(c(plot_data_transfer$obs, plot_data_transfer$pred), na.rm = T)
 
-  # per-panel metrics for annotation
+  # per-panel metric labels for both predictor sets, stacked vertically and
+  # coloured to match the points (base on top, struct_comp below)
   metrics_for_plot <- transfer_metrics %>%
     dplyr::filter(response == resp) %>%
     dplyr::mutate(
       leaf_type = factor(leaf_type, levels = c('all', 'deciduous', 'coniferous')),
-      scenario_label = factor(scenario,
-        levels = c('lon model -> lon data', 'loff model -> loff data',
-                   'lon model -> loff data', 'loff model -> lon data'),
-        labels = c('leaf-on -> leaf-on', 'leaf-off -> leaf-off',
-                   'leaf-on -> leaf-off', 'leaf-off -> leaf-on')),
-      label = paste0('rRMSE: ', round(rel_RMSE, 1), '%\n', 'R² = ', round(R2, 2))
+      scenario_label = factor(scenario, levels = scenario_levels, labels = scenario_labels),
+      predictor_set = factor(predictor_set, levels = c('base', 'struct_comp'),
+                             labels = names(pred_obs_cols)),
+      label = paste0('rRMSE ', round(rel_RMSE, 1), '%, R² ', round(R2, 2)),
+      lab_y = axis_max - (axis_max - axis_min) *
+              ifelse(predictor_set == names(pred_obs_cols)[1], 0.05, 0.17)
     )
 
-  p <- ggplot(plot_data_transfer, aes(x = pred, y = obs)) +
+  p <- ggplot(plot_data_transfer,
+              aes(x = pred, y = obs, colour = predictor_set, shape = predictor_set)) +
     geom_point(alpha = 0.6, size = 1.5) +
     geom_abline(slope = 1, intercept = 0, linewidth = 0.8,
-                color = 'red', linetype = 'dashed') +
-    geom_smooth(method = 'lm', se = F, linewidth = 0.8, color = 'black') +
+                color = 'black', linetype = 'dashed') +
+    geom_smooth(method = 'lm', se = F, linewidth = 0.7) +
     geom_text(data = metrics_for_plot,
-              aes(x = axis_min + (axis_max - axis_min) * 0.05,
-                  y = axis_max - (axis_max - axis_min) * 0.05,
-                  label = label),
-              hjust = 0, vjust = 1, size = 2.5) +
+              aes(x = axis_min + (axis_max - axis_min) * 0.05, y = lab_y,
+                  label = label, colour = predictor_set),
+              hjust = 0, vjust = 1, size = 2, show.legend = FALSE, inherit.aes = FALSE) +
     facet_grid(leaf_type ~ scenario_label) +
     coord_fixed(ratio = 1, xlim = c(axis_min, axis_max), ylim = c(axis_min, axis_max)) +
+    scale_colour_manual(values = pred_obs_cols, name = '') +
+    scale_shape_manual(values = pred_obs_shapes, name = '') +
     labs(title = paste0('Transferability: ', forest_inv_label),
          x = 'Predicted',
          y = 'Observed') +
@@ -1429,15 +1616,13 @@ for (resp in unique(scenario_predictions$response)) {
     theme(plot.title = element_text(hjust = 0.5, face = 'bold'),
           strip.background = element_rect(fill = 'lightgrey'),
           strip.text = element_text(face = 'bold'),
-          panel.grid = element_blank())
+          panel.grid = element_blank(),
+          legend.position = 'bottom')
 
   print(p)
 
-  # save the predicted vs. observed plot for this response variable
   ggplot2::ggsave(
     filename = file.path(output_dir, paste0('transferability_pred_obs_', resp, '.pdf')),
-    plot = p,
-    width = 10,
-    height = 8
+    plot = p, width = 10, height = 8.5
   )
 }
