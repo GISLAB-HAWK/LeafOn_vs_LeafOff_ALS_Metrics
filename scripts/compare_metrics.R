@@ -1,85 +1,128 @@
 #-------------------------------------------------------------------------------
 # Name:         compare_metrics.R
-# Description:  compare Metrics for the two rasters between leaf-on and leaf-off 
-#               conditions.
+# Description:  Compare ABA metrics between leaf-on and leaf-off conditions
+#               at pixel level, using a balanced sample of validated pixels.
+#               Produces descriptive summaries, paired Wilcoxon tests and
+#               scatter / difference-density figures.
 # Author:       Svenja Dobelmann
 # Contact:      svenja.dobelmann@hawk.de
 #-------------------------------------------------------------------------------
 
-# source setup script
-source('src/setup.R', local = TRUE)
+source('src/setup.R')
 
-#### Data preparation ####
 
-# read raster files  
-loff_r <- rast(
-  file.path(processed_data_dir, 'metrics','pix_level','solling24_loff_ppm20_lt20_indices.tiff')
-               ) 
-lon_r <- rast(
-  file.path(processed_data_dir, 'metrics','pix_level','solling23_lon_ppm20_lt20_indices.tiff')
+# 01 - configuration
+#-------------------
+
+# Point density of the input rasters.
+# Used for both input paths and output figure names.
+PPM  <- "ppm20"
+
+# Input rasters per season: subdirectory and file basename
+inputs <- list(
+  leaf_on = list(
+    dir  = "metrics_leafon_2023",
+    file = paste0("solling23_lon_", PPM, "_metrics.tiff")
+  ),
+  leaf_off = list(
+    dir  = "metrics_leafoff_2024",
+    file = paste0("solling24_loff_", PPM, "_metrics.tiff")
   )
- 
-pix_valid <-  read.csv(
-  file.path(output_dir, 'sample_selection.csv')
-) %>% filter(status == "valid")
+)
 
-pts <- vect(pix_valid, geom = c("x", "y"), crs = crs(lon_r))
+# Sample of validated pixels
+SAMPLE_FILE <- "sample_selection_n400_balanced.csv"
 
-#  Extract corresponding values from both rasters
 
-lon_vals  <- terra::extract(lon_r, pts)
-loff_vals <- terra::extract(loff_r, pts)
+# Variable order used for tables and facets (24 metrics)
+lvl <- c("BE_H_MAX", "BE_H_P95", "BE_H_P90", "BE_H_P80", "BE_H_P50", "BE_H_P20",
+         "BE_H_P10", "BE_PR_02", "BE_PR_05", "BE_PR_10", "BE_PR_20", "BE_PR_30",
+         "BE_RD_02", "BE_RD_05", "BE_RD_10", "BE_RD_20", "BE_RD_30",
+         "BE_H_KURTOSIS", "BE_H_SKEW", "BE_H_VAR", "BE_H_SD", "BE_H_MEAN",
+         "point_density", "pulse_returns_mean")
 
-#lon_vals  <- cbind(pts, lon_vals)
-#loff_vals <- cbind(pts, loff_vals)
 
-# extract data
-lon_df <- as.data.frame(lon_vals,xy = TRUE, na.rm = T) 
-loff_df <- as.data.frame(loff_vals, xy = TRUE, na.rm = T) 
+# 02 - data preparation
+#----------------------
 
-# combine datasets and bring into long format 
+lon_r <- rast(
+  file.path(processed_data_dir, inputs$leaf_on$dir, PPM, inputs$leaf_on$file)
+)
+
+loff_r <- rast(
+  file.path(processed_data_dir, inputs$leaf_off$dir, PPM, inputs$leaf_off$file)
+)
+
+# Validated sample pixels
+pix_valid <- read.csv(file.path(metadata_dir, SAMPLE_FILE)) %>%
+  filter(status == "valid")
+
+
+pts <- vect(pix_valid, geom = c("x", "y"), crs = as.character(crs(lon_r)))
+
+# Extract corresponding values from both rasters
+lon_vals  <- terra::extract(lon_r,  pts, xy = TRUE, cells = TRUE)
+loff_vals <- terra::extract(loff_r, pts, xy = TRUE, cells = TRUE)
+
+lon_df  <- as.data.frame(lon_vals,  xy = TRUE, na.rm = TRUE) %>% rename('ts' = class_name)
+loff_df <- as.data.frame(loff_vals, xy = TRUE, na.rm = TRUE) %>% rename('ts' = class_name)
+
+# Combine both seasons and reshape to long format
 df_long <- bind_rows(
   lon_df  %>% mutate(season = "leaf on"),
   loff_df %>% mutate(season = "leaf off")
 ) %>%
-  pivot_longer(cols = -c(season, ts, ID), names_to = "variable", values_to = "value") %>%
+  pivot_longer(cols = -c(season, ts, ID, x, y, cell),
+               names_to = "variable", values_to = "value") %>%
   mutate(species = case_when(
-    ts == "1" ~ "decidious",
+    ts == "1" ~ "deciduous",
     ts == "2" ~ "coniferous",
     TRUE ~ NA_character_
   )) %>%
-  dplyr::select(-ts)
+  dplyr::select(-ts) %>%
+  mutate(variable = factor(variable, levels = lvl))
 
-# summarize the data
-df_summary <- df_long %>%
-  group_by(season, variable) %>%
-  dplyr::summarise(mean = mean(value), sd = sd(value), min = min(value), max = max(value))
-
-print(df_summary)
-
-# brint data to wide format 
+# Wide format with paired values and their difference
 df_wide <- df_long %>%
   pivot_wider(names_from = season, values_from = value) %>%
-  rename(leaf_on = `leaf on`,
+  rename(leaf_on  = `leaf on`,
          leaf_off = `leaf off`) %>%
   mutate(diff = leaf_on - leaf_off)
-  
 
-# summarize the data
-df_summary <- df_wide %>%
+
+# 03 - descriptive summaries
+#---------------------------
+
+# Per season and variable
+df_summary_long <- df_long %>%
+  group_by(season, variable) %>%
+  dplyr::summarise(mean = mean(value), sd = sd(value),
+                   min = min(value), max = max(value),
+                   .groups = "drop")
+
+print(df_summary_long, n = Inf)
+
+# Paired, per variable
+df_summary_wide <- df_wide %>%
   group_by(variable) %>%
-  dplyr::summarise(mean_lon = mean(leaf_on), sd_lon = sd(leaf_on), mean_loff = mean(leaf_off), sd_loff = sd(leaf_off)) %>%
-  mutate(diff = mean_lon-mean_loff)
+  dplyr::summarise(mean_lon  = mean(leaf_on),  sd_lon  = sd(leaf_on),
+                   mean_loff = mean(leaf_off), sd_loff = sd(leaf_off),
+                   .groups = "drop") %>%
+  mutate(diff = mean_lon - mean_loff)
 
-print(df_summary)
+print(df_summary_wide, n = Inf)
 
-#### wilcoxon-test ####
 
-# first, testing for normal distribution 
+# 04 - statistical tests
+#-----------------------
+
+# Test for normality of the paired differences.
 shapiro <- df_wide %>%
+  #filter(species == "deciduous") %>%
+  #filter(species == "coniferous") %>%
   group_by(variable) %>%
   dplyr::summarise(
-    shapiro = list(shapiro.test(diff)), ### REVISION NEEDED! testing on difference (lon-loff) not the real data 
+    shapiro = list(shapiro.test(diff)),
     .groups = "drop"
   ) %>%
   rowwise() %>%
@@ -89,273 +132,116 @@ shapiro <- df_wide %>%
     method    = shapiro$method
   ) %>%
   dplyr::select(-shapiro, -method) %>%
-  dplyr::mutate(signif = ifelse(p.value < 0.05, "***", ""))
+  mutate(
+    signif = case_when(
+      p.value < 0.01 ~ "***",
+      p.value < 0.05 ~ "**",
+      p.value < 0.1  ~ "*",
+      TRUE ~ ""
+    ))
 
 print(shapiro, n = 34)
-any(shapiro$p.value>0.05)
+any(shapiro$p.value > 0.05)
 
-# data not normally distributed. using non-parametric wilcoxon-test instead of simple t-test
+# Differences are not normally distributed -> paired Wilcoxon test
+# instead of a paired t-test.
 
-wilcox_test <- df_wide %>%
-  #filter(species == "decidious") %>%
-  #filter(species == "coniferous") %>%
-  tidyr::drop_na(leaf_on, leaf_off) %>%   # remove NAs
-  group_by(variable) %>%
-  dplyr::summarise(
-    n_pairs   = n(),
-    mean_diff = mean(leaf_on - leaf_off),
-    
-    # run Wilcoxon once
-    test      = list(wilcox.test(
-      leaf_on, leaf_off,
-      paired = TRUE,
-      exact  = FALSE
-    )),
-    
-    W         = test[[1]]$statistic,
-    p.value   = test[[1]]$p.value,
-    
-    # rank-biserial correlation
-    r_rb      = (2 * W) / (n_pairs * (n_pairs + 1)) - 1,
-    
-    .groups = "drop"
-  ) %>%
-  mutate(
-    signif = ifelse(p.value < 0.05, "***", ""),
-  )
-print(wilcox_test)
-
-any(wilcox_test$p.value > 0.05)
-
-
-# change order of variables for later plotting
-lvl = c("BE_H_MAX","BE_H_P90","BE_H_P80","BE_H_P50","BE_H_P20",
-        "BE_H_P10", "BE_PR_02","BE_PR_10", "BE_RD_02", "BE_RD_10", 
-        "BE_H_KURTOSIS", "BE_H_SKEW", "BE_H_VAR", "BE_H_SD", "BE_H_MEAN",
-        "point_density", "pulse_returns_mean")
-
-df_wide$variable <- factor(df_wide$variable, 
-                           levels = lvl )  
-df_long$variable <- factor(df_long$variable, 
-                           levels = lvl)  
-
-
-## plot results 
-df_norm <- df_wide %>% 
-  filter(!is.na(species)) %>% # keeping only samples where species is known 
-  group_by(variable) %>%
-  mutate(
-    leaf_on_n  = (leaf_on  - min(c(leaf_on, leaf_off), na.rm = TRUE)) /
-      (max(c(leaf_on, leaf_off), na.rm = TRUE) -
-         min(c(leaf_on, leaf_off), na.rm = TRUE)),
-    leaf_off_n = (leaf_off - min(c(leaf_on, leaf_off), na.rm = TRUE)) /
-      (max(c(leaf_on, leaf_off), na.rm = TRUE) -
-         min(c(leaf_on, leaf_off), na.rm = TRUE))
-  ) %>%
-  ungroup()
-
-
-
-panel_labels <- df_wide %>%
-  distinct(variable) %>%
-  arrange(variable) %>%              # ensures stable order
-  mutate(
-    label = paste0(letters[seq_along(variable)], ")")
-  )
-
-letter_labeller <- function(x) {
-  setNames(paste0(letters[seq_along(x)], ")"), x)
+#' Run paired Wilcoxon tests for all variables in one subset
+#'
+#' @param data Data frame in wide format with columns variable, leaf_on, leaf_off.
+#'
+#' @return Tibble with one row per variable: sample size, mean and median
+#'   difference, test statistic, raw and BH-adjusted p-value, rank-biserial
+#'   effect size and ratios.
+run_wilcox <- function(data) {
+  data %>%
+    tidyr::drop_na(leaf_on, leaf_off) %>%
+    group_by(variable) %>%
+    dplyr::summarise(
+      n_pairs     = n(),
+      mean_diff   = mean(leaf_on - leaf_off),
+      median_diff = median(leaf_on - leaf_off),
+      med_on      = median(leaf_on),
+      med_off     = median(leaf_off),
+      test        = list(wilcox.test(leaf_on, leaf_off, paired = TRUE, exact = FALSE)),
+      W           = test[[1]]$statistic,
+      p.value     = test[[1]]$p.value,
+      effsize     = list(effectsize::rank_biserial(
+        x = leaf_on, y = leaf_off, paired = TRUE, ci = 0.95, verbose = FALSE
+      )),
+      r_rb        = effsize[[1]]$r_rank_biserial,
+      .groups = "drop"
+    ) %>%
+    mutate(
+      # Uniform ratio: > 1 = leaf-on higher, < 1 = leaf-off higher.
+      # NA for signed distribution measures and denominators close to zero.
+      ratio = if_else(
+        str_detect(variable, "KURTOSIS|SKEW") | abs(med_off) < 1e-9,
+        NA_real_,
+        med_on / med_off
+      ),
+      # PR only: interception instead of transmission (for the text)
+      int_ratio = if_else(
+        str_detect(variable, "_PR_") & med_off < 1 - 1e-9,
+        (1 - med_on) / (1 - med_off),
+        NA_real_
+      ),
+      p_adj  = p.adjust(p.value, method = "BH"),
+      signif = case_when(
+        p_adj < 0.01 ~ "***",
+        p_adj < 0.05 ~ "**",
+        p_adj < 0.1  ~ "*",
+        TRUE         ~ ""
+      )
+    ) %>%
+    dplyr::select(-test, -effsize)
 }
 
-# aesthetics for species
-sc_cols <- c(coniferous = "grey30", decidious = "grey60")
-sc_shapes <- c(coniferous = 17, decidious = 16)
-sc_labs <- c(coniferous = "Coniferous", decidious = "Deciduous")   # or whatever you want
-
-
-s <- ggplot(df_norm, aes(x = leaf_on_n, y = leaf_off_n, colour = species)) +
-  geom_point(alpha = 0.4, size = 0.85,aes(shape = species)) +
-  geom_smooth(method = "lm", se = FALSE, linewidth = 0.65, linetype = "solid", aes(color = species)) +
-  geom_abline(
-    intercept = 0,
-    slope = 1,
-    color = "red",
-    linetype = "dashed",
-    linewidth = 0.4
-  ) + 
-  scale_x_continuous(limits = c(0, 1),breaks = seq(0.2,0.8,0.2)) +
-  scale_y_continuous(limits = c(0, 1),breaks = seq(0.2,0.8,0.2)) +
-  facet_wrap(~ variable, labeller = as_labeller(letter_labeller), scales = "fixed", ncol = 3, nrow = 8) +
-  geom_text(
-    data = panel_labels,
-    aes(label = label),
-    x = -Inf, y = Inf,                # top-left corner
-    hjust = -0.4, vjust = 1.4,
-    size = 3,
-    inherit.aes = FALSE
-  ) + 
-  ggpubr::stat_cor(
-    aes(label = ..r.label..),
-    method = "spearman",
-    cor.coef.name = "rho",
-    size = 2.5,
-    show.legend = FALSE,
-    na.rm = TRUE,
-    geom = "text",
-    label.x.npc = 0.7,
-    label.y.npc = 0.2,
-    lineheight = 0.7
-  ) +
-  theme_classic(base_size = 12) +
-  labs(
-    x = "Leaf-On Value",
-    y = "Leaf-Off Value"
-  ) +
-  scale_colour_manual(values = sc_cols) +
-  scale_shape_manual(values = sc_shapes) +
-  theme(
-    axis.title = element_text(size = 8, color = "black"),
-    axis.text = element_text(size = 6, color = "black"),
-    axis.ticks = element_line(color = "black"),
-    axis.line = element_line(color = "black"),
-    legend.position = "none",
-    strip.text = element_blank(), 
-    panel.spacing = unit(0, "lines"),
-    panel.border = element_rect(
-      colour = "black",
-      fill = NA,
-      linewidth = 0.4
-    )
-  )
-s
-
-
-## create custom legend
-leg_df <- data.frame(
-  species = c("coniferous","coniferous","coniferous",
-              "decidious","decidious","decidious"),
-  type    = c("label","point","line",
-              "label","point","line"),
-  x       = c(1,1,1, 2,2,2),
-  y       = c(3,2,1, 3,2,1)
+results <- list(
+  all        = run_wilcox(df_wide),
+  coniferous = run_wilcox(df_wide %>% filter(species == "coniferous")),
+  deciduous  = run_wilcox(df_wide %>% filter(species == "deciduous"))  
 )
 
-p_leg <- ggplot() +
-  # text labels (top)
-  geom_text(
-    data = subset(leg_df, type == "label"),
-    aes(x = x, y = y, label = sc_labs[species]),
-    fontface = "bold",
-    size = 2
-  ) +
-  # points (middle)
-  geom_point(
-    data = subset(leg_df, type == "point"),
-    aes(x = x, y = y, shape = species, colour = species),
-    size = 2
-  ) +
-  # solid lines (bottom)
-  geom_segment(
-    data = subset(leg_df, type == "line"),
-    aes(x = x - 0.2, xend = x + 0.2,
-        y = y, yend = y, colour = species),
-    linewidth = 0.7
-  ) +
-  scale_colour_manual(values = sc_cols, guide = "none") +
-  scale_shape_manual(values = sc_shapes, guide = "none") +
-  coord_cartesian(xlim = c(0.6, 2.4),
-                  ylim = c(0.6, 3.4),
-                  expand = FALSE) +
-  theme_void() +
-  theme(legend.position = "none")
-
-s <- s +
-  inset_element(
-    p_leg,
-    left   = 0.75,
-    bottom = 0.05,
-    right  = 0.95,
-    top    = 0.1
-  )
-
-print(s)
-
-ggsave(paste0(output_dir,"/pix_scatterplot_ppm20_lt20.png"),s, units = "cm", dpi = 350, width = 14, height = 20)
-
-#### density plot ####
-
-## define custom theme for plotting
-custom_theme <- theme_classic(base_size = 20) +
-  theme(
-    axis.title = element_text(size = 12),
-    axis.text.x = element_text(size = 6, margin = margin(t = 2)),
-    axis.text.y = element_text(size = 6, margin = margin(t = 10)),
-    axis.line = element_line(linewidth = 0.3),
-    axis.ticks = element_line(linewidth = 0.2),
-    panel.grid = element_blank(),
-    plot.title = element_blank(),
-    strip.background = element_blank(),
-    strip.text = element_blank(),
-    #plot.margin = margin(t = 10, r = 30, b = 10, l = 10),
-    legend.position = "none"
-  )
-
-## define linetype, color and legend labels
-lt <- c(lon23 = "solid", loff24 = "dashed")
-fc <- c(lon23 = "#1b9e77", loff24 = "#d95f02")
-labs <- c(lon23 = "Leaf-on", loff24 = "Leaf-off")
-
-fc_season <- c("leaf on" = "#1b9e77",
-               "leaf off" = "#d95f02")
-labs_season <- c("leaf on" = "Leaf-on",
-                 "leaf off" = "Leaf-off")
+invisible(lapply(results, function(df) print(df, n = Inf)))
 
 
-d <- ggplot(df_long, aes(x = value, fill = season)) +
-  geom_density(alpha = 0.7, linewidth = 0.4) +
-  facet_wrap(~ variable, scales = "free", ncol = 3) +
-  geom_text(
-    data = panel_labels,
-    aes(label = label),
-    x = -Inf, y = Inf,                # top-left corner
-    hjust = -0.4, vjust = 1.4,
-    size = 4,
-    inherit.aes = FALSE
-  ) + 
-  labs(y = "Density (KDE)", x = "Metric Value") + 
-  scale_fill_manual(
-    values = fc_season) + 
-  custom_theme
+#--- export test results ---------------------------------------------------
+  
 
-
-# fake density shape
-x <- seq(-3, 3, length.out = 300)
-dens_leg <- rbind(
-  data.frame(season = "leaf on",  x = x, y = dnorm(x)),
-  data.frame(season = "leaf off", x = x, y = dnorm(x))
+# Normality tests
+write.csv(
+  shapiro,
+  file.path(output_dir, "stats", paste0("shapiro_", PPM, ".csv")),
+  row.names = FALSE
 )
 
-p_leg_dens <- ggplot(dens_leg, aes(x = x, y = y, fill = season)) +
-  geom_area(alpha = 0.7, colour = "black", linewidth = 0.25) +
-  facet_wrap(~season, nrow = 1, labeller = labeller(season = labs_season)) +
-  scale_fill_manual(values = fc_season) +
-  theme_void() +
-  theme(
-    legend.position = "none",
-    strip.text = element_text(size = 8, face = "bold"),
-    strip.background = element_blank(),
-    plot.margin = margin(2, 2, 2, 2)
-  )
+# Wilcoxon results: one combined table with a subset column
+results_tbl <- bind_rows(results, .id = "subset") 
 
-d <- d +
-  inset_element(
-    p_leg_dens,
-    left = 0.72, bottom = 0.001,
-    right = 0.95, top = 0.12
-  )
+write.csv(
+  results_tbl,
+  file.path(output_dir, "stats", paste0("wilcoxon_", PPM, ".csv")),
+  row.names = FALSE
+)
 
-print(d)
+# Same content as RDS, keeps factor levels and full precision for reuse in R
+saveRDS(
+  results,
+  file.path(output_dir, "stats", paste0("wilcoxon_", PPM, ".rds"))
+)
 
-ggsave(paste0(output_dir,"/pix_densityplot_ppm20_lt20.png"),d, units = "cm", dpi = 350, width = 14, height = 20)
+saveRDS(
+  df_wide,
+  file.path(output_dir, "stats", paste0("df_wide_", PPM, ".rds"))
+)
 
-##############################################################################
+# Descriptive summaries
+write.csv(
+  df_summary_wide,
+  file.path(output_dir, "stats", paste0("summary_paired_", PPM, ".csv")),
+  row.names = FALSE
+)
+
+
+message("test results written to: ",  file.path(output_dir, "stats"))

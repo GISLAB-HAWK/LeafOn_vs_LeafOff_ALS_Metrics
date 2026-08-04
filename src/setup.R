@@ -14,59 +14,32 @@
 
 # create directory called 'data' with sub directories
 # 'raw_data', 'processed_data', and 'metadata'
-if (!file.exists(paste('data')) |
-    (!file.exists(paste('data/raw_data')) |
-     (!file.exists(paste('data/raw_data/forest_inventory')) |
-      (!file.exists(paste('data/raw_data/pc_leafoff_2024')) |
-       (!file.exists(paste('data/raw_data/pc_leafon_2023')) ||
-        (!file.exists(paste('data/processed_data')) |
-         (!file.exists(paste('data/processed_data/forest_inventory')) |
-          (!file.exists(paste('data/processed_data/pc_leafoff_2024')) |
-           (!file.exists(paste('data/processed_data/pc_leafon_2023')) |
-            (!file.exists(paste('data/processed_data/pc_leafoff_2024/ppm4')) |
-             (!file.exists(paste('data/processed_data/pc_leafoff_2024/ppm10')) |
-              (!file.exists(paste('data/processed_data/pc_leafoff_2024/ppm20')) |
-               (!file.exists(paste('data/processed_data/pc_leafon_2023/ppm4')) |
-                (!file.exists(paste('data/processed_data/pc_leafon_2023/ppm10')) |
-                 (!file.exists(paste('data/processed_data/pc_leafon_2023/ppm20')) |
-                  (!file.exists(paste('data/processed_data/metrics')) |
-                   (!file.exists(paste('data/processed_data/metrics/plt_level')) |
-                    (!file.exists(paste('data/processed_data/metrics/pix_level')) |
-                     (!file.exists(paste('data/processed_data/train_test_ds')) |
-                      (!file.exists(paste('data/processed_data/models')) |
-                       (!file.exists(paste('data/processed_data/predictions')) |
-                        (!file.exists(paste('data/metadata'))
-                ))))))))))))))))))))))
-  {
-  
-  dir.create('data')
-  dir.create('data/raw_data')
-  dir.create('data/raw_data/forest_inventory')
-  dir.create('data/raw_data/pc_leafoff_2024')
-  dir.create('data/raw_data/pc_leafon_2023')
-  dir.create('data/processed_data')
-  dir.create('data/processed_data/forest_inventory')
-  dir.create('data/processed_data/pc_leafoff_2024')
-  dir.create('data/processed_data/pc_leafon_2023')
-  dir.create('data/processed_data/pc_leafoff_2024/ppm4')
-  dir.create('data/processed_data/pc_leafoff_2024/ppm10')
-  dir.create('data/processed_data/pc_leafoff_2024/ppm20')
-  dir.create('data/processed_data/pc_leafon_2023/ppm4')
-  dir.create('data/processed_data/pc_leafon_2023/ppm10')
-  dir.create('data/processed_data/pc_leafon_2023/ppm20')
-  dir.create('data/processed_data/metrics')
-  dir.create('data/processed_data/metrics/plt_level')
-  dir.create('data/processed_data/metrics/pix_level')
-  dir.create('data/processed_data/train_test_ds')
-  dir.create('data/processed_data/models')
-  dir.create('data/processed_data/predictions')
-  dir.create('data/metadata')
-  
-} else {
-  
-  invisible()
-  
-}
+dirs <- c(
+  'data/raw_data/forest_inventory',
+  'data/raw_data/pc_leafoff_2024',
+  'data/raw_data/pc_leafon_2023',
+  'data/processed_data/forest_inventory',
+  'data/processed_data/pc_leafoff_2024/ppm4',
+  'data/processed_data/pc_leafoff_2024/ppm10',
+  'data/processed_data/pc_leafoff_2024/ppm20',
+  'data/processed_data/pc_leafon_2023/ppm4',
+  'data/processed_data/pc_leafon_2023/ppm10',
+  'data/processed_data/pc_leafon_2023/ppm20',
+  'data/processed_data/metrics/plt_level',
+  'data/processed_data/metrics/pix_level/ppm10',
+  'data/processed_data/metrics/pix_level/ppm20',
+  'data/processed_data/metrics/pix_level/ppm4',
+  'data/processed_data/train_test_ds',
+  'data/processed_data/models',
+  'data/processed_data/predictions',
+  'data/metadata/tree_species',
+  'data/metadata/dsm',
+  'output/figures',
+  'output/stats',
+  'src', 'docs', 'scripts', 'output'
+)
+
+for (d in dirs) dir.create(d, recursive = TRUE, showWarnings = FALSE)
 
 # create directory called 'src'
 if (!file.exists(paste('src'))) {
@@ -119,6 +92,8 @@ list.files(recursive = TRUE, include.dirs = TRUE)
 
 # 02 - file path definitions
 #---------------------------
+# define meta data directory
+metadata_dir <- 'data/metadata'
 
 # define raw data directory
 raw_data_dir <- 'data/raw_data'
@@ -180,9 +155,9 @@ load_packages <- function(packages, github_remotes = NULL, github_repos = NULL) 
 }
 
 load_packages(
-  c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2','ggpubr',
-    'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST',
-    'parallel', 'doParallel', 'tidyverse', 'corrplot','patchwork'),
+  c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2','ggpubr', 'lasR', 'data.table',
+    'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST', 'future','effectsize',
+    'parallel', 'doParallel', 'tidyverse', 'corrplot','patchwork', 'biotools','rcompanion'),
   github_remotes = c(TreeGrOSSinR = 'rnuske/TreeGrOSSinR', future = 'futureverse/future'),
   github_repos = c(lasR = 'https://r-lidar.r-universe.dev')
   )

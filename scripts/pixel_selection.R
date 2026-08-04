@@ -3,7 +3,7 @@
 # Description:  interactive script that plots the extent of randomly selected   
 #               metrik pixels (10x10m) and shows the surface model in a higher 
 #               resolution 0,5m. User can then set the validity of the pixel. 
-#               Goal is to get a sample of 100 valid pixel localtions for the 
+#               Goal is to get a sample of 400 valid pixel localtions for the 
 #               further analysis.
 # Author:       Svenja Dobelmann
 # Contact:      svenja.dobelmann@hawk.de
@@ -13,15 +13,21 @@
 # source setup script
 source('src/setup.R', local = TRUE)
 
+##logging into the server
+fileName <- r'{/home/sdobelma/.config/rsdb_credentials.txt}' # file containing your username and pw in the form "username:password"
+userpwd <- trimws(readChar(fileName, file.info(fileName)$size)) #  read account from file
+remotesensing <-RSDB::RemoteSensing$new("https://gislab.hawk.de",userpwd)
+
 
 # Output
-out_csv <- file.path(output_dir, "sample_selection.csv")
+out_csv <- file.path(output_dir, "sample_selection_n400_balanced_new.csv")
 
 #### Parameter Setup ####
 
 set.seed(123)
 
-n_valid_target <- 100   # Ziel: 100 valide Samples
+n_valid_target <- 400   
+n_per_class <- n_valid_target / 2  # 200 coniferous, 200 deciduous
 pixel_size <- 10
 buffer_m <- 3
 diff_min <- -15
@@ -29,21 +35,17 @@ diff_max <- 15
 
 #### Load data ####
 
-lon_r <- rast(
-    file.path(processed_data_dir, 'metrics','pix_level','solling23_lon_ppm20_lt20_indices.tiff')
-  )
-  
-loff_r <- rast(
-  file.path(processed_data_dir, 'metrics','pix_level','solling24_loff_ppm20_lt20_indices.tiff')
-)
+loff_db <- remotesensing$rasterdb("solling24_loff_ppm20_lt20_debugged_indices")
+loff_r <- rast(loff_db$raster(ext = loff_db$extent))
 
-lon_dsm <- rast(
-  file.path(processed_data_dir, 'metrics','pix_level','solling23_lon_ppm20_lt20_dsm05.tiff')
-)
+lon_db <- remotesensing$rasterdb("solling23_lon_ppm20_lt20_debugged_indices")
+lon_r <- rast(lon_db$raster(ext = lon_db$extent))
 
-loff_dsm <- rast(
-  file.path(processed_data_dir, 'metrics','pix_level','solling24_loff_ppm20_lt20_dsm05.tiff')
-)
+loff_dsm_db <- remotesensing$rasterdb("solling24_loff_ppm20_lt20_debugged_rasterized")
+loff_dsm <- rast(loff_dsm_db$raster(ext = loff_db$extent))
+
+lon_dsm_db <- remotesensing$rasterdb("solling23_lon_ppm20_lt20_debugged_rasterized")
+lon_dsm <- rast(lon_dsm_db$raster(ext = lon_db$extent))
 
 
 #### Pre-select suitable canditate pixels ####
@@ -59,10 +61,10 @@ mask_na <- app(is_na, fun = function(x) any(x, na.rm = TRUE))
 
 # 2. masking out height difference >10m (assuming clearcut)
 diff <- loff_r$BE_H_MAX - lon_r$BE_H_MAX
-mask_diff <- diff <= -10
+mask_diff <- abs(diff) >= 5
 
 # 3. masking out non forested areas 
-mask_nontree <- lon_r$ts == 0
+mask_nontree <- lon_r$band1 == 0
 
 # combine the three masks 
 mask_combined <- mask_na | mask_diff | mask_nontree
@@ -74,10 +76,21 @@ lon_r <- mask(lon_r, mask_combined, maskvalue = TRUE)
 
 valid_10m <- !is.na(lon_r) & !is.na(loff_r) 
 
-cand <- as.data.frame(valid_10m, xy = TRUE, cells = TRUE, na.rm = TRUE) %>%
-  dplyr::select(cell, x, y, ts ) %>%
-  rename( valid = ts) %>%
-  filter(valid == "TRUE")
+cand <- as.data.frame(lon_r$band1, xy = TRUE, cells = TRUE, na.rm = TRUE)
+
+ts_vals <- terra::extract(lon_r$band1, cand[, c("x", "y")])
+
+cand <- cand %>%
+  mutate(species = case_when(
+    ts_vals$band == 1 ~ "deciduous",
+    ts_vals$band == 2 ~ "coniferous",
+    TRUE ~ NA_character_
+  )) %>%
+  filter(!is.na(species)) %>%
+  # random order within each species group
+  group_by(species) %>%
+  slice_sample(prop = 1) %>%  
+  ungroup()
 
 if (nrow(cand) == 0) {
   stop("No valid 10-m-Pixel found.")
@@ -112,21 +125,32 @@ make_pixel_polygon <- function(x, y, pixel_size, crs_str = "") {
 
 save_results <- function(results_list, out_csv) {
   if (length(results_list) > 0) {
-    df <- do.call(rbind, results_list)
+    df <- dplyr::bind_rows(results_list)
     write.csv(df, out_csv, row.names = FALSE)
   }
 }
 
 # Difference-DSM
-diff_dsm <- loff_dsm - lon_dsm
+diff_dsm <- loff_dsm[[2]] - lon_dsm[[2]]
 
-#### Interactive selection until 100 pixels are selected ####
+#### Interactive selection until n pixels are selected ####
 results <- list()
-n_valid <- 0
 candidate_index <- 1
 review_counter <- 0
+n_valid_deciduous   <- 0
+n_valid_coniferous  <- 0
 
-while (n_valid < n_valid_target && candidate_index <= nrow(cand)) {
+while ((n_valid_deciduous < n_per_class || n_valid_coniferous < n_per_class) && 
+       candidate_index <= nrow(cand)) {
+  
+  current_species <- cand$species[candidate_index]
+  
+  # skip if this species class is already full
+  if ((current_species == "deciduous"  && n_valid_deciduous  >= n_per_class) |
+      (current_species == "coniferous" && n_valid_coniferous >= n_per_class)) {
+    candidate_index <- candidate_index + 1
+    next
+  }
   
   review_counter <- review_counter + 1
   
@@ -138,6 +162,10 @@ while (n_valid < n_valid_target && candidate_index <= nrow(cand)) {
   
   lon_dsm_crop <- crop(lon_dsm, e)
   loff_dsm_crop <- crop(loff_dsm, e)
+  
+  lon_dsm_crop <- lon_dsm_crop[[2]]
+  loff_dsm_crop <- loff_dsm_crop[[2]]
+  
   diff_crop  <- crop(diff_dsm, e)
   
   pix_poly <- make_pixel_polygon(x, y, pixel_size, crs(lon_r))
@@ -146,12 +174,11 @@ while (n_valid < n_valid_target && candidate_index <= nrow(cand)) {
   if (ncell(diff_crop) == 0) {
     results[[length(results) + 1]] <- data.frame(
       review_id = review_counter,
-      cell = cell_id,
-      x = x,
-      y = y,
-      lon_r = cand$lon_r[candidate_index],
-      loff_r = cand$loff_r[candidate_index],
-      status = "skipped_empty"
+      cell      = cell_id,
+      x         = x,
+      y         = y,
+      species   = current_species,   
+      status    = "skipped_empty"
     )
     candidate_index <- candidate_index + 1
     save_results(results, out_csv)
@@ -164,7 +191,7 @@ while (n_valid < n_valid_target && candidate_index <= nrow(cand)) {
   
   plot(lon_dsm_crop, main = paste0("DSM Leaf-on "), range = minmax(lon_dsm_crop))
   lines(pix_poly, col = "red", lwd = 2)
-
+  
   plot(loff_dsm_crop, main = "DSM Leaf-off", range = minmax(lon_dsm_crop))
   lines(pix_poly, col = "red", lwd = 2)
   
@@ -173,11 +200,12 @@ while (n_valid < n_valid_target && candidate_index <= nrow(cand)) {
   
   par(op)
   
-  cat("\n")
   cat("====================================================\n")
   cat("Review:", review_counter, "\n")
-  cat("already valid:", n_valid, "out of", n_valid_target, "\n")
-  cat("Candidate:", candidate_index, "von", nrow(cand), "\n")
+  cat("Species:", current_species, "\n")   # <- add this line
+  cat("Valid deciduous: ",  n_valid_deciduous,  "/", n_per_class, "\n")
+  cat("Valid coniferous:", n_valid_coniferous, "/", n_per_class, "\n")
+  cat("Candidate:", candidate_index, "of", nrow(cand), "\n")
   cat("Coordinate:", round(x, 2), round(y, 2), "\n")
   cat("Entry: v = valid | n = invalid | s = skip | q = quit\n")
   
@@ -185,7 +213,8 @@ while (n_valid < n_valid_target && candidate_index <= nrow(cand)) {
   
   if (ans == "v") {
     status <- "valid"
-    n_valid <- n_valid + 1
+    if (current_species == "deciduous")  n_valid_deciduous  <- n_valid_deciduous  + 1
+    if (current_species == "coniferous") n_valid_coniferous <- n_valid_coniferous + 1
   } else if (ans == "n") {
     status <- "invalid"
   } else if (ans == "s") {
@@ -195,15 +224,15 @@ while (n_valid < n_valid_target && candidate_index <= nrow(cand)) {
     break
   } else {
     status <- "skipped"
-    cat("invalid entry -> saved as skipped.\n")
   }
   
   results[[length(results) + 1]] <- data.frame(
     review_id = review_counter,
-    cell = cell_id,
-    x = x,
-    y = y,
-    status = status
+    cell      = cell_id,
+    x         = x,
+    y         = y,
+    species   = current_species,   
+    status    = status
   )
   
   save_results(results, out_csv)
@@ -214,18 +243,6 @@ while (n_valid < n_valid_target && candidate_index <= nrow(cand)) {
 
 save_results(results, out_csv)
 
-df_final <- do.call(rbind, results)
-n_valid_final <- sum(df_final$status == "valid")
-
-cat("\n")
-cat("Finished\n")
-cat("Valid Samples:", n_valid_final, "\n")
-cat("saved in:", out_csv, "\n")
-
-if (n_valid_final < n_valid_target && candidate_index > nrow(cand)) {
-  cat("Note: Not enough valid candidates found to meet", n_valid_target,
-      "valid samples.\n")
-}
 
 
 
