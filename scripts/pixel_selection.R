@@ -13,14 +13,8 @@
 # source setup script
 source('src/setup.R', local = TRUE)
 
-##logging into the server
-fileName <- r'{/home/sdobelma/.config/rsdb_credentials.txt}' # file containing your username and pw in the form "username:password"
-userpwd <- trimws(readChar(fileName, file.info(fileName)$size)) #  read account from file
-remotesensing <-RSDB::RemoteSensing$new("https://gislab.hawk.de",userpwd)
-
-
 # Output
-out_csv <- file.path(output_dir, "sample_selection_n400_balanced_new.csv")
+out_csv <- file.path(metadata_dir, "sample_selection_n400_balanced.csv")
 
 #### Parameter Setup ####
 
@@ -35,24 +29,34 @@ diff_max <- 15
 
 #### Load data ####
 
-loff_db <- remotesensing$rasterdb("solling24_loff_ppm20_lt20_debugged_indices")
-loff_r <- rast(loff_db$raster(ext = loff_db$extent))
+loff_r <- rast(
+  file.path(
+  processed_data_dir, "metrics_leafoff_2024", "ppm20", "solling24_loff_ppm20_metrics.tiff")
+)
 
-lon_db <- remotesensing$rasterdb("solling23_lon_ppm20_lt20_debugged_indices")
-lon_r <- rast(lon_db$raster(ext = lon_db$extent))
+lon_r <- rast(
+  file.path(
+  processed_data_dir, "metrics_leafon_2023", "ppm20", "solling23_lon_ppm20_metrics.tiff")
+)
 
-loff_dsm_db <- remotesensing$rasterdb("solling24_loff_ppm20_lt20_debugged_rasterized")
-loff_dsm <- rast(loff_dsm_db$raster(ext = loff_db$extent))
+loff_dsm <- rast(
+  file.path(metadata_dir, "dsm", "solling23_lon_ppm20_dsm05.tiff")
+)
 
-lon_dsm_db <- remotesensing$rasterdb("solling23_lon_ppm20_lt20_debugged_rasterized")
-lon_dsm <- rast(lon_dsm_db$raster(ext = lon_db$extent))
+lon_dsm <- rast(
+  file.path(metadata_dir, "dsm", "solling24_loff_ppm20_dsm05.tiff")
+)
+
+## tree species data 
+ts_r <- rast(
+  file.path(metadata_dir, "tree_species", "CLMS_2023_Solling_merged_25832.tif")
+)
 
 
 #### Pre-select suitable canditate pixels ####
 
 # crop rasters to same extent 
 lon_r <- crop(lon_r, loff_r)
-lon_dsm <- crop(lon_dsm, ext(loff_dsm))
 
 # mask only valid cells
 # 1. masking out NA
@@ -64,7 +68,7 @@ diff <- loff_r$BE_H_MAX - lon_r$BE_H_MAX
 mask_diff <- abs(diff) >= 5
 
 # 3. masking out non forested areas 
-mask_nontree <- lon_r$band1 == 0
+mask_nontree <- lon_r$class_name == 0
 
 # combine the three masks 
 mask_combined <- mask_na | mask_diff | mask_nontree
@@ -76,14 +80,14 @@ lon_r <- mask(lon_r, mask_combined, maskvalue = TRUE)
 
 valid_10m <- !is.na(lon_r) & !is.na(loff_r) 
 
-cand <- as.data.frame(lon_r$band1, xy = TRUE, cells = TRUE, na.rm = TRUE)
+cand <- as.data.frame(lon_r$class_name, xy = TRUE, cells = TRUE, na.rm = TRUE)
 
-ts_vals <- terra::extract(lon_r$band1, cand[, c("x", "y")])
+ts_vals <- terra::extract(lon_r$class_name, cand[, c("x", "y")])
 
 cand <- cand %>%
   mutate(species = case_when(
-    ts_vals$band == 1 ~ "deciduous",
-    ts_vals$band == 2 ~ "coniferous",
+    ts_vals$class_name == 1 ~ "deciduous",
+    ts_vals$class_name == 2 ~ "coniferous",
     TRUE ~ NA_character_
   )) %>%
   filter(!is.na(species)) %>%
@@ -131,7 +135,8 @@ save_results <- function(results_list, out_csv) {
 }
 
 # Difference-DSM
-diff_dsm <- loff_dsm[[2]] - lon_dsm[[2]]
+e <- terra::intersect(ext(lon_dsm), ext(loff_dsm))
+diff_dsm <- crop(loff_dsm, e) - crop(lon_dsm, e)
 
 #### Interactive selection until n pixels are selected ####
 results <- list()
@@ -242,8 +247,6 @@ while ((n_valid_deciduous < n_per_class || n_valid_coniferous < n_per_class) &&
 #### Save results ####
 
 save_results(results, out_csv)
-
-
 
 
 ################################################################################

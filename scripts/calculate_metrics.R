@@ -1,161 +1,127 @@
 #-------------------------------------------------------------------------------
 # Name:         calculate_metrics.R
-# Description:  Script calculates metrics for raster cells with the Area Based approach
-#               using the point clouds from leaf-on and leaf-off season and for 
-#               different point densities.
-#               The RSDB (Remote Sensing Database) R-package is used for this.
-#               For further information see
-#               https://github.com/environmentalinformatics-marburg/rsdb-data and 
-#               https://environmentalinformatics-marburg.github.io/rsdb/docs/r_package_installation/ 
-#               The pointclouds and a output raster dummy need to be uploaded to the RSDB before
-#               running this script!
+# Description:  Calculating 24 ABA Metrics from ALS data using the lidR pixel_metrics() 
+#               function and las Catalog object 
 # Author:       Svenja Dobelmann
 # Contact:      svenja.dobelmann@hawk.de
-#               
 #-------------------------------------------------------------------------------
 
-# source setup script
 source('src/setup.R', local = TRUE)
-
-# 01: setup the connection to RSDB
-#-------------------------------------------------------------------------------
-#if(!require("remotes")) install.packages("remotes")
-
-# install RSDB package and automatically install updated versions
-#remotes::install_github("environmentalinformatics-marburg/rsdb/r-package")
-# In some cases a restart of R is needed to work with a updated version of RSDB package (in RStudio - Session - Terminate R).
-
-# logging into the server
-fileName <- r'{/home/sdobelma/.config/rsdb_credentials.txt}' # file containing your username and pw in the form "username:password"
-userpwd <- trimws(readChar(fileName, file.info(fileName)$size)) #  read account from file
-remotesensing <-RSDB::RemoteSensing$new("https://gislab.hawk.de",userpwd)
+source('src/be_metrics_func.R', local = TRUE) # load the funtion for calculating metrics
 
 
-# 02: metrics calculation
-#-------------------------------------------------------------------------------
+# 01 - configuration
+#-------------------
 
-# list point cloud layers
-remotesensing$pointclouds
-remotesensing$rasterdbs
-
-# set of metrics to calculate
-metrics <- c(
-  'point_density',
-  'BE_H_KURTOSIS',
-  'BE_H_SKEW',
-  'BE_H_VAR',
-  'BE_H_SD',
-  'BE_H_MAX',
-  'BE_H_MEAN',
-  'BE_H_P10',
-  'BE_H_P20',
-  'BE_H_P50',
-  'BE_H_P80',
-  'BE_H_P90',
-  'BE_H_P95',
-  'BE_PR_02',
-  'BE_PR_05',
-  'BE_PR_10',
-  'BE_PR_20',
-  'BE_PR_30',
-  'BE_RD_02',
-  'BE_RD_05',
-  'BE_RD_10',
-  'BE_RD_20',
-  'BE_RD_30',
-  'pulse_returns_mean'
+# seasons and point densites (point per metersquare)
+seasons <- list(
+  solling23_lon = list(
+    in_dir  = "pc_leafon_2023",
+    out_dir = "metrics_leafon_2023"
+  ),
+  solling24_loff = list(
+    in_dir  = "pc_leafoff_2024",
+    out_dir = "metrics_leafoff_2024"
+  )
 )
 
-# forest attributes
-forest_attributes <- c(
-  'chm_height_mean',
-  'ENL0',
-  'chm_surface_area',
-  'dtm_surface_area',
-  'BE_FHD',
-  'vegetation_coverage_05m_CHM',
-  'vegetation_point_density'
-)
-
-## define seasons and densities to build pointcloud names 
-seasons <- c("solling23_lon", "solling24_loff")
 ppms <- c("ppm20", "ppm10", "ppm4")
 
-## function for the task  
-submit_index_task <- function(season,
-                              ppm,
-                              metric_set = c("indices", "forest_attributes"),
-                              scanangle_filter = TRUE,
-                              scanangle = "lt20",
-                              debugged = TRUE,
-                              task_pointcloud = "index_raster") {
+THRESHOLDS  <- c(2, 5, 10, 20, 30)   # Height thresholds for RD und PR [m]
+CHUNK_SIZE  <- 500
+CHUNK_BUFF  <- 20
+DROP_CLASS  <- "-drop_class 7 18"
+
+
+# Reference raster: defines resolution, extent and raster gitter 
+raster_template <- rast(
+  file.path(metadata_dir, "tree_species", "CLMS_DLT2023_clipped.tif")
+)
+
+res_val   <- res(raster_template)[1]
+start_val <- c(xmin(raster_template), ymin(raster_template))
+
+
+# 02 - worker function
+#---------------------
+
+#' Compute ABA metrics for one season / point density combination
+#'
+#' @param season Character. Name of the season, must be one of names(seasons).
+#' @param ppm Character. Point density subfolder, e.g. "ppm20".
+#' @param overwrite Logical. Recompute even if the output file already exists.
+#'
+#' @return Invisibly, the path to the written raster, or NULL on failure.
+#' 
+calc_metrics_task <- function(season, ppm, overwrite = FALSE) {
   
-  metric_set <- match.arg(metric_set)
-  selected_metrics <- if (metric_set == "indices") metrics else forest_attributes
+  cfg <- seasons[[season]]
   
-  # build pointcloud name
-  pointcloud_name <- paste(season, ppm, sep = "_")
+  in_dir   <- file.path(processed_data_dir, cfg$in_dir, ppm)
+  out_dir  <- file.path(processed_data_dir, cfg$out_dir, ppm)
+  out_name <- paste0(season, "_", ppm, "_metrics.tiff")
+  out_file <- file.path(out_dir, out_name)
   
-  if (scanangle_filter) {
-    pointcloud_name <- paste(pointcloud_name, scanangle, sep = "_")
+  if (file.exists(out_file) && !overwrite) {
+    message("skipping (exists): ", out_name)
+    return(invisible(out_file))
+  }
+  if (!dir.exists(in_dir)) {
+    warning("input directory not found: ", in_dir)
+    return(invisible(NULL))
   }
   
-  if (debugged) {
-    pointcloud_name <- paste(pointcloud_name, "debugged", sep = "_")
-  }
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   
-  # build rasterdb name
-  rasterdb_name <- paste(pointcloud_name, metric_set, sep = "_")
+  message("processing: ", season, " / ", ppm)
   
-  # step 1: rebuild CLMS layer
-  remotesensing$submit_task(task = list(
-    task_rasterdb = "rebuild",
-    rasterdb = "CLMS_DLT2023_clipped"
-  ))
+  ctg <- readLAScatalog(in_dir)
+  opt_chunk_size(ctg)   <- CHUNK_SIZE
+  opt_chunk_buffer(ctg) <- CHUNK_BUFF
+  opt_filter(ctg)       <- DROP_CLASS
+  opt_select(ctg)       <- "*"
   
-  # step 2: rename to rasterdb_name
-  remotesensing$submit_task(task = list(
-    task_rasterdb = "rename",
-    rasterdb = "CLMS_DLT2023_clipped_rebuild",
-    new_name = rasterdb_name
-  ))
+  m <- pixel_metrics(
+    ctg,
+    ~be_metrics(HAG, Classification, ReturnNumber, NumberOfReturns,
+                thresholds = THRESHOLDS,
+                cell_area  = res_val^2),
+    res   = res_val,
+    start = start_val
+  )
   
-  # warte bis RasterDB existiert
-  start <- Sys.time()
-  repeat {
-    existing <- remotesensing$rasterdbs$name
-    if (rasterdb_name %in% existing) break
-    if (as.numeric(Sys.time() - start) > 60) stop("Timeout: RasterDB not found: ", rasterdb_name)
-    Sys.sleep(3)
-  }
-  cat("RasterDB ready:", rasterdb_name, "\n")
+  m   <- crop(extend(m, raster_template), raster_template)
+  out <- c(m, raster_template)
   
-  # step 3: submit index task
-  result <- remotesensing$submit_task(task = list(
-    task_pointcloud = task_pointcloud,
-    pointcloud = pointcloud_name,
-    rasterdb = rasterdb_name,
-    indices = selected_metrics
-  ))
+  writeRaster(out, out_file, overwrite = TRUE)
+  message("written: ", out_file)
   
-  return(result)
+  invisible(out_file)
 }
 
-## save results in a list
+
+# 03 - run over all combinations
+#-------------------------------
+
+n_cores <- max(1, parallel::detectCores() - 4)
+plan(multisession, workers = n_cores)
+
 results <- list()
 
-for (season in seasons) {
+for (season in names(seasons)) {
   for (ppm in ppms) {
+    
     name <- paste(season, ppm, sep = "_")
     
-    results[[name]] <- submit_index_task(
-      season = season,
-      ppm = ppm,
-      metric_set = "indices", # "indices",  # oder "forest_attributes"
-      scanangle_filter = TRUE,
-      scanangle = "lt20"
+    results[[name]] <- tryCatch(
+      calc_metrics_task(season = season, ppm = ppm),
+      error = function(e) {
+        warning("failed for ", name, ": ", conditionMessage(e))
+        NULL
+      }
     )
   }
 }
 
-################################################################################
+plan(sequential)
+

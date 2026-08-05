@@ -51,7 +51,7 @@ VCI_MIN_H       <- 0
 # Reference raster: defines resolution, extent and raster grid.
 # Native 10 m in EPSG:3035, reprojected to EPSG:25832, hence res = 9.9968 m 
 raster_template <- rast(
-  file.path(metadata_dir, "tree_species", "CLMS_2023_Solling_merged_25832.tif")
+  file.path(metadata_dir, "tree_species", "CLMS_DLT2023_clipped.tif")
 )
 
 res_val   <- res(raster_template)[1]
