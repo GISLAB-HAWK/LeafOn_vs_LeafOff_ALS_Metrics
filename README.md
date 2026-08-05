@@ -4,9 +4,9 @@ Comparison of leaf-on vs. leaf-off airborne laser scanning (ALS) data for forest
 
 ## Context
 
-ALS has become integral to forest inventory and monitoring. Federal agencies typically acquire data in winter, while Germany’s Digital Twin initiative collects data during vegetation periods. This shift raises critical questions regarding forest parameter estimation and model transferability between leaf-on and leaf-off states.
+ALS has become integral to forest inventory and monitoring. Federal agencies typically acquire data in winter, while Germany’s Digital Twin initiative collects data also during vegetation periods. This shift raises critical questions regarding forest parameter estimation and model transferability between leaf-on and leaf-off states.
 
-## Area-Based Growing Stock Volume (GSV) Modeling
+## Area-Based Estimation of Forest Inventory Attributes
 
 ### Metrics Comparison
 
@@ -14,12 +14,15 @@ ALS has become integral to forest inventory and monitoring. Federal agencies typ
 -   Investigation of which metrics are most affected by phenological state
 -   Analysis of metric stability across seasons
 
-### GSV Modeling
+### Modeling Forest Inventory Attributes
 
--   Access which data is better suited to model GSV
+-   Access which data is better suited to model forest inventory attributes, e.g. growing stock volume, above ground biomass, tree density, basal area, and quadratic mean diameter
 -   Cross-seasonal model transferability and bias assessment
 
 ## Data involved
 
 -   leaf-on (September 2023) and leaf-off (March 2024) ALS data (Riegl VQ-780 II-S/Riegl VQ-780i)
 -   sample based forest inventory (“Betriebsinventur”) of Lower Saxony
+
+![](docs/cs_plot_lon_loff.jpg)
+*Cross sections of leaf-on and leaf-off point clouds.*

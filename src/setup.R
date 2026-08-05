@@ -25,10 +25,14 @@ dirs <- c(
   'data/processed_data/pc_leafon_2023/ppm4',
   'data/processed_data/pc_leafon_2023/ppm10',
   'data/processed_data/pc_leafon_2023/ppm20',
+  'data/processed_data/chm_leafoff',
+  'data/processed_data/chm_leafon',
+  'data/processed_data/gap_polygons_leafoff',
+  'data/processed_data/gap_polygons_leafon',
   'data/processed_data/metrics/plt_level',
+  'data/processed_data/metrics/pix_level/ppm4',
   'data/processed_data/metrics/pix_level/ppm10',
   'data/processed_data/metrics/pix_level/ppm20',
-  'data/processed_data/metrics/pix_level/ppm4',
   'data/processed_data/train_test_ds',
   'data/processed_data/models',
   'data/processed_data/predictions',
@@ -101,6 +105,9 @@ raw_data_dir <- 'data/raw_data'
 # define processed data directory
 processed_data_dir <- 'data/processed_data' 
 
+# define meta data directory
+meta_data_dir <- 'data/metadata/'
+
 # define output directory
 output_dir <- 'output/'
 
@@ -110,7 +117,7 @@ output_dir <- 'output/'
 #----------------------
 
 # load (and install) required packages
-load_packages <- function(packages, github_remotes = NULL, github_repos = NULL) {
+load_packages <- function(packages, github_remotes = NULL, github_repos = NULL, gitlab_remotes = NULL) {
   
   if (!requireNamespace("remotes", quietly = TRUE)) {
     install.packages("remotes")
@@ -152,12 +159,41 @@ load_packages <- function(packages, github_remotes = NULL, github_repos = NULL) 
       }
     }
   }
+  
+  if (!is.null(gitlab_remotes)) {
+    for (pkg_name in names(gitlab_remotes)) {
+      if (!require(pkg_name, character.only = TRUE, quietly = TRUE)) {
+        message(paste("Package '", pkg_name, "' not found, attempting to install from GitLab using remotes (", gitlab_remotes[[pkg_name]]$repo, ")...", sep = ""))
+        
+        repo <- gitlab_remotes[[pkg_name]]$repo
+        build_vignettes <- if (!is.null(gitlab_remotes[[pkg_name]]$build_vignettes)) {
+          gitlab_remotes[[pkg_name]]$build_vignettes
+        } else {
+          FALSE
+        }
+        
+        remotes::install_gitlab(repo, build_vignettes = build_vignettes)
+        
+        if (!require(pkg_name, character.only = TRUE, quietly = TRUE)) {
+          stop(paste("Package '", pkg_name, "' not found and could not be installed from GitLab.", sep = ""))
+        }
+      }
+    }
+  }
 }
 
 load_packages(
-  c('terra', 'lidR' , 'sf', 'stats','dplyr', 'ggplot2','ggpubr', 'lasR', 'data.table', 'car', 'caret',
-    'mgcv', 'scam', 'cowplot', 'ggrepel', 'caret', 'CAST', 'future','effectsize','lmerTest',
-    'parallel', 'doParallel', 'tidyverse', 'corrplot','patchwork', 'biotools','rcompanion'),
-  github_remotes = c(TreeGrOSSinR = 'rnuske/TreeGrOSSinR', future = 'futureverse/future'),
-  github_repos = c(lasR = 'https://r-lidar.r-universe.dev')
+  c('terra', 'lidR', 'sf', 'stats', 'dplyr', 'ggplot2', 'ggpubr', 'lasR',
+    'data.table', 'car', 'caret', 'mgcv', 'scam', 'cowplot', 'ggrepel',
+    'CAST', 'future', 'effectsize', 'lmerTest', 'parallel', 'doParallel',
+    'tidyverse', 'corrplot', 'patchwork', 'biotools', 'rcompanion',
+    'ranger', 'exactextractr', 'geometry', 'ggpattern'),
+  github_remotes = c(
+    TreeGrOSSinR = 'rnuske/TreeGrOSSinR',
+    ForestGapR   = 'carlos-alberto-silva/ForestGapR'
+  ),
+  github_repos = c(lasR = 'https://r-lidar.r-universe.dev'),
+  gitlab_remotes = list(
+    rBDAT = list(repo = 'vochr/rBDAT', build_vignettes = TRUE)
   )
+)
