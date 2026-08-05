@@ -19,7 +19,7 @@
 #'  res = res_val,
 #'  start = start_val
 #')#'
-
+ 
 
 be_metrics <- function(Z, Classification, ReturnNumber, NumberOfReturns, thresholds, cell_area) {
   
