@@ -24,5 +24,10 @@ ALS has become integral to forest inventory and monitoring. Federal agencies typ
 -   leaf-on (September 2023) and leaf-off (March 2024) ALS data (Riegl VQ-780 II-S/Riegl VQ-780i)
 -   sample based forest inventory (“Betriebsinventur”) of Lower Saxony
 
-![](docs/cs_plot_lon_loff.jpg)
-*Cross sections of leaf-on and leaf-off point clouds.*
+
+Input data are not included in this repository. Download from
+[GRO Link]
+and place the contents as follows:
+
+<img src = "docs/pc_plot_transect.png" width = "800" height = "400">
+*Cross sections of leaf-on and leaf-off point clouds at different points per squaremeter (ppm).*
