@@ -26,12 +26,8 @@ ALS has become integral to forest inventory and monitoring. Federal agencies typ
 
 
 Input data are not included in this repository. Download from
-https://doi.org/10.5281/zenodo.XXXXXXX 
+[GRO Link]
 and place the contents as follows:
-
-data/raw_data/pc_leafon_2023/    <- pointclouds_leafon.zip
-data/raw_data/pc_leafoff_2024/   <- pointclouds_leafoff.zip
-data/raw_data/forest_inventory/  <- inventory.csv
 
 ![](docs/pc_plot_transect.png)
 *Cross sections of leaf-on and leaf-off point clouds.*
