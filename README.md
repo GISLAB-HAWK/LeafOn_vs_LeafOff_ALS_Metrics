@@ -30,4 +30,4 @@ Input data are not included in this repository. Download from
 and place the contents as follows:
 
 ![](docs/pc_plot_transect.png)
-*Cross sections of leaf-on and leaf-off point clouds.*
+*Cross sections of leaf-on and leaf-off point clouds at different points per squaremeter (ppm).*
