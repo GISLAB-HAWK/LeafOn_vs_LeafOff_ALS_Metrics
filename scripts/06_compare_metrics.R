@@ -84,9 +84,12 @@ df_long <- bind_rows(
 
 # Wide format with paired values and their difference
 df_wide <- df_long %>%
-  pivot_wider(names_from = season, values_from = value) %>%
-  rename(leaf_on  = `leaf on`,
-         leaf_off = `leaf off`) %>%
+  pivot_wider(
+    id_cols     = c(ID, cell, variable, species),
+    names_from  = season,
+    values_from = value
+  ) %>%
+  rename(leaf_on = `leaf on`, leaf_off = `leaf off`) %>%
   mutate(diff = leaf_on - leaf_off)
 
 

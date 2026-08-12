@@ -191,7 +191,7 @@ point_metrics_fun <- function(X, Y, Z,
   # --- VCI: normalized Shannon entropy of the point heights, range [0, 1] ---
   z_vci <- if (vci_min_h > 0) Z[Z >= vci_min_h] else Z
   vci   <- if (length(z_vci) < 2L) NA_real_ else
-    tryCatch(VCI(z_vci, zmax = Z_MAX_VALID, by = 1), error = function(e) NA_real_)
+    tryCatch(VCI(z_vci, zmax = ZMAX_FIX, by = 1), error = function(e) NA_real_)
   
   list(Box_dimension = box_dim,
        ENL0D         = unname(enl[1]),

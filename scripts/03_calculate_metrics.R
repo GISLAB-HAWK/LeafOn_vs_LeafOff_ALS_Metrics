@@ -79,7 +79,7 @@ calc_metrics_task <- function(season, ppm, overwrite = FALSE) {
   opt_chunk_size(ctg)   <- CHUNK_SIZE
   opt_chunk_buffer(ctg) <- CHUNK_BUFF
   opt_filter(ctg)       <- DROP_CLASS
-  opt_select(ctg)       <- "*"
+  opt_select(ctg)       <- "crn0"     # nur Class, ReturnNumber, NumberOfReturns, Extra Bytes (HAG)
   
   m <- pixel_metrics(
     ctg,
@@ -96,6 +96,10 @@ calc_metrics_task <- function(season, ppm, overwrite = FALSE) {
   writeRaster(out, out_file, overwrite = TRUE)
   message("written: ", out_file)
   
+  rm(ctg, m, out)                     # große Objekte freigeben
+  gc()                                # Speicher ans System zurückgeben
+  
+  
   invisible(out_file)
 }
 
@@ -103,7 +107,7 @@ calc_metrics_task <- function(season, ppm, overwrite = FALSE) {
 # 03 - run over all combinations
 #-------------------------------
 
-n_cores <- max(1, parallel::detectCores() - 4)
+n_cores <- max(1, parallel::detectCores() - 8)
 plan(multisession, workers = n_cores)
 
 results <- list()

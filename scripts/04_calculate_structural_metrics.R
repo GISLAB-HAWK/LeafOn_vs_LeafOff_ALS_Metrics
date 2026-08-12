@@ -34,7 +34,7 @@ CHUNK_SIZE <- 500
 CHUNK_BUFF <- 20
 DROP_CLASS <- "-drop_class 7 18"
 SELECT     <- "xyz1"   # HAG = extra byte 1, "xyz0" would read all extra bytes
-N_WORKERS  <- 12       # limited by RAM, not by cores
+N_WORKERS  <- 12      # limited by RAM, not by cores
 
 # Metric parameters, used as defaults in src/functions_structural_metrics.R
 ZMAX_FIX        <- 45      # VCI upper bound (fixed -> same scaling for all cells)
@@ -96,8 +96,10 @@ calc_structural_task <- function(season, ppm, overwrite = FALSE) {
   opt_chunk_buffer(ctg) <- CHUNK_BUFF
   opt_filter(ctg)       <- DROP_CLASS
   opt_select(ctg)       <- SELECT
-  opt_output_files(ctg) <- ""   # keep results in RAM
-  
+  # Chunk-Ergebnisse direkt auf Platte schreiben statt im RAM sammeln
+  opt_output_files(ctg) <- file.path(
+    out_dir, "tiles", paste0(season, "_", ppm, "struct_{XLEFT}_{YBOTTOM}")
+  )  
   # catalog_apply() instead of pixel_metrics(): each chunk needs Z set from HAG
   # and two passes, point based and on the decimated cloud.
   m <- catalog_apply(
@@ -114,6 +116,9 @@ calc_structural_task <- function(season, ppm, overwrite = FALSE) {
   
   writeRaster(out, out_file, overwrite = TRUE)
   message("written: ", out_file)
+  
+  rm(ctg, m, out)                     # große Objekte freigeben
+  gc()                                # Speicher ans System zurückgeben
   
   invisible(out_file)
 }

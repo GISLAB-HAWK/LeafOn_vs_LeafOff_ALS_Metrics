@@ -49,7 +49,7 @@ lon_dsm <- rast(
 
 ## tree species data 
 ts_r <- rast(
-  file.path(metadata_dir, "tree_species", "CLMS_2023_Solling_merged_25832.tif")
+  file.path(metadata_dir, "tree_species", "CLMS_DLT2023_clipped.tif")
 )
 
 
@@ -168,9 +168,6 @@ while ((n_valid_deciduous < n_per_class || n_valid_coniferous < n_per_class) &&
   lon_dsm_crop <- crop(lon_dsm, e)
   loff_dsm_crop <- crop(loff_dsm, e)
   
-  lon_dsm_crop <- lon_dsm_crop[[2]]
-  loff_dsm_crop <- loff_dsm_crop[[2]]
-  
   diff_crop  <- crop(diff_dsm, e)
   
   pix_poly <- make_pixel_polygon(x, y, pixel_size, crs(lon_r))
@@ -248,5 +245,6 @@ while ((n_valid_deciduous < n_per_class || n_valid_coniferous < n_per_class) &&
 
 save_results(results, out_csv)
 
+message("pixel selection written to: ",out_csv)
 
 ################################################################################
