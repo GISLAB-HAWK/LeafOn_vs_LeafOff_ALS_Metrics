@@ -4,6 +4,7 @@
 #               defines file paths for data import and output,
 #               and loads required packages.
 # Author:       Florian Franz
+#               Svenja Dobelmann
 # Contact:      florian.franz@nw-fva.de
 #-------------------------------------------------------------
 
@@ -15,7 +16,6 @@
 # create directory called 'data' with sub directories
 # 'raw_data', 'processed_data', and 'metadata'
 dirs <- c(
-  'data/raw_data/forest_inventory',
   'data/raw_data/pc_leafoff_2024',
   'data/raw_data/pc_leafon_2023',
   'data/processed_data/forest_inventory',
@@ -27,15 +27,10 @@ dirs <- c(
   'data/processed_data/pc_leafon_2023/ppm20',
   'data/processed_data/chm_leafoff',
   'data/processed_data/chm_leafon',
-  'data/processed_data/gap_polygons_leafoff',
-  'data/processed_data/gap_polygons_leafon',
   'data/processed_data/metrics/plt_level',
   'data/processed_data/metrics/pix_level/ppm4',
   'data/processed_data/metrics/pix_level/ppm10',
   'data/processed_data/metrics/pix_level/ppm20',
-  'data/processed_data/train_test_ds',
-  'data/processed_data/models',
-  'data/processed_data/predictions',
   'data/metadata/tree_species',
   'data/metadata/dsm',
   'output/figures',
