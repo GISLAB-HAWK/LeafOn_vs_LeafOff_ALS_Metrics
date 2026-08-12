@@ -33,5 +33,5 @@ data/raw_data/pc_leafon_2023/    <- pointclouds_leafon.zip
 data/raw_data/pc_leafoff_2024/   <- pointclouds_leafoff.zip
 data/raw_data/forest_inventory/  <- inventory.csv
 
-![](docs/cs_plot_lon_loff.jpg)
+![](docs/pc_plot_transect.png)
 *Cross sections of leaf-on and leaf-off point clouds.*
