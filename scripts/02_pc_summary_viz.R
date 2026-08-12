@@ -1,7 +1,7 @@
 #-------------------------------------------------------------------------------
-# Name:         compare_pointcloud_viz.R
+# Name:         pc_summary_viz.R
 # Description:  Visualize the point cloud level comparison of the harmonized
-#               laz files (see compare_pointcloud.R). Produces a point count
+#               laz files (see pc_summary.R). Produces a point count
 #               table, a return statistics table with conditional return
 #               probabilities and mirrored height histograms for leaf-on and
 #               leaf-off conditions.
@@ -21,14 +21,13 @@ PPM <- "ppm20"
 
 # lasR summaries produced by compare_pointcloud.R
 inputs <- list(
-  leaf_on  = paste0("pc_description_lon23_",  PPM, ".rds"),
-  leaf_off = paste0("pc_description_loff24_", PPM, ".rds")
+  leaf_on  = paste0("lon23_",  PPM, "_pc_description.rds"),
+  leaf_off = paste0("loff24_", PPM, "_pc_description.rds")
 )
 
-stats_dir <- file.path(output_dir, "stats")
 
 # Point classes in the harmonized clouds
-CLASS_VEG    <- "1"
+CLASS_NONGROUND    <- "1"
 CLASS_GROUND <- "2"
 
 # Return statistics: returns above this number are pooled into one row,
@@ -37,7 +36,7 @@ RETURN_GROUP_FROM <- 7
 
 # Height histogram
 Z_MAX      <- 40   # highest normalized height shown (m)
-ZBIN       <- 2     # bin width of the Z histogram (m), see compare_pointcloud.R
+ZBIN       <- 2     # bin width of the Z histogram (m), see pc_summary.R
 PCT_MAX    <- 10    # y axis limit (%)
 LOESS_SPAN <- 0.65
 
@@ -74,9 +73,9 @@ point_count <- data.frame(
     lon23$npoints,
     loff24$npoints
   ),
-  vegetation_points = c(
-    lon23$npoints_per_class[CLASS_VEG],
-    loff24$npoints_per_class[CLASS_VEG]
+  non_ground_points = c(
+    lon23$npoints_per_class[CLASS_NONGROUND],
+    loff24$npoints_per_class[CLASS_NONGROUND]
   ),
   ground_points = c(
     lon23$npoints_per_class[CLASS_GROUND],
@@ -84,9 +83,9 @@ point_count <- data.frame(
   )
 ) %>%
   mutate(
-    canopy_to_ground_ratio = vegetation_points / ground_points,
-    vegetation_fraction    = vegetation_points /
-      (vegetation_points + ground_points) * 100
+    canopy_to_ground_ratio = non_ground_points / ground_points,
+    vegetation_fraction    = non_ground_points /
+      (non_ground_points + ground_points) * 100
   )
 
 print(point_count)
@@ -259,6 +258,8 @@ p_hist
 
 #--- export tables and figures -------------------------------------------------
 
+# directories for the output 
+stats_dir <- file.path(output_dir, "stats")
 fig_dir <- file.path(output_dir, "figures")
 
 # Point counts per class
@@ -281,6 +282,8 @@ saveRDS(
   file.path(stats_dir, paste0("pc_returns_", PPM, ".rds"))
 )
 
+
+# save figure 
 ggsave(
   file.path(fig_dir, paste0("pc_z_hist_", PPM, ".png")),
   p_hist, dpi = 500, width = 16, height = 10

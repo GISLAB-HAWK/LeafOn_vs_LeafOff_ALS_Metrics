@@ -1,8 +1,6 @@
 #-------------------------------------------------------------------------------
-# Name:         compare_pointcloud.R
-# Description:  Compare the harmonized laz files on the point cloud level,
-#               i.e. point / pulse count and height histogram, for leaf-on
-#               and leaf-off conditions. Both catalogs are clipped to their
+# Name:         pc_summary.R
+# Description:   leaf-on and leaf-off catalogs are clipped to their
 #               common extent, height normalized and summarised with a
 #               lasR pipeline. Results are stored as RDS per season.
 # Author:       Svenja Dobelmann
@@ -23,7 +21,7 @@ PPM <- "ppm20"
 ZBIN <- 2
 
 # Cores used by the lasR pipeline
-N_CORES <- max(1, parallel::detectCores() - 1)
+N_CORES <- max(1, parallel::detectCores() - 4)
 
 # Input point clouds per season: subdirectory and output basename
 inputs <- list(
