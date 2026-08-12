@@ -29,5 +29,5 @@ Input data are not included in this repository. Download from
 [GRO Link]
 and place the contents as follows:
 
-![](docs/pc_plot_transect.png)
+<img src = "docs/pc_plot_transect.png" width = "400>
 *Cross sections of leaf-on and leaf-off point clouds at different points per squaremeter (ppm).*
