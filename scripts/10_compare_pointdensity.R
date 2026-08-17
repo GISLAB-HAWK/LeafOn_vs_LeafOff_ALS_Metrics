@@ -50,7 +50,7 @@ SAMPLE_FILE <- "sample_selection_n400_balanced.csv"
 species_lab <- c("1" = "deciduous", "2" = "coniferous")
 
 # Columns that are design or diagnostic layers, not stand attributes
-DESIGN_VARS <- c("point_density", "pulse_returns_mean", "Zmax", "n_scales")
+DESIGN_VARS <- c("point_density", "Zmax", "n_scales")
 
 # Redundant metrics (e.g. SD vs VAR, percentile series) are dropped 
 COR_CUTOFF <- 0.9
@@ -176,7 +176,7 @@ options(contrasts = c("contr.sum", "contr.poly"))
 #'
 #' @return merMod object.
 fit_one <- function(v) {
-  f <- as.formula(paste0("`", v, "` ~ leaf_con * dens * species + (1|ID)"))
+  f <- as.formula(paste0("`", v, "` ~ leaf_con * dens * species + (1 + leaf_con|ID)"))
   lmerTest::lmer(f, data = df_all)
 }
 
@@ -311,4 +311,4 @@ saveRDS(df_all,
 
 message("test results for ", set_cfg$tag, " written to: ", stats_dir)
 message("diagnostic plots written to: ", fig_dir)
-
+# 
