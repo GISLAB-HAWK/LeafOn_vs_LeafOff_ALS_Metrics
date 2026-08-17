@@ -4,7 +4,7 @@ Comparison of leaf-on vs. leaf-off airborne laser scanning (ALS) data for forest
 
 ## Abstract
 
-Airborne laser scanning (ALS) campaigns of forests differ in canopy phenology, yet the metrics derived from them are increasingly compared and combined across acquisitions. We quantified how leaf condition (i.e. leaf-on vs leaf-off) affects area-based structural metrics, and whether pulse density modulates it. Two acquisitions of the same forest in Central Germany, six months apart and harmonised to a common pulse density and scan angle, were compared for 24 conventional and eight structural complexity metrics across 400 randomly selected raster cells stratified by forest type. Differences were assessed with paired Wilcoxon tests, rank-biserial effect sizes, pixel-level rank correlations, and mixed-effects models at three pulse densities. Sensitivity increased with penetration depth into the stand, from a median difference of 0.038 m for maximum height to 1.66 m for the 10th height percentile and 4.75 m in deciduous stands, whereas effects in evergreen coniferous stands were an order of magnitude smaller. Effect size alone proved a poor criterion of robustness: mean canopy height differed strongly yet preserved the ranking of pixels, amounting to a systematic offset that can be corrected, whereas the fractal box dimension shifted only slightly but reordered the ranking. Seasonal differences were largely independent of pulse density. Maximum height was the only metric largely unaffected by leaf condition. Metrics describing the lower canopy, point densities and the box dimension should not be compared across leaf conditions in deciduous stands. Robustness thus follows from how a metric is calculated rather than from the structural property it describes.
+Airborne laser scanning (ALS) campaigns of forests differ in canopy phenology, yet the metrics derived from them are increasingly compared and combined across acquisitions. We quantified how leaf condition (i.e. leaf-on vs leaf-off) affects area-based structural metrics, and whether pulse density modulates it. Two acquisitions of the same forest in Central Germany, six months apart and harmonised to a common pulse density and scan angle, were compared for 24 conventional and eight structural complexity metrics across 400 randomly selected raster cells stratified by forest type. Differences were assessed with paired Wilcoxon tests, rank-biserial effect sizes, pixel level rank correlations, and mixed-effects models at three pulse densities. Sensitivity increased with penetration depth into the stand, from a median difference of 0.038 m for maximum height to 1.66 m for the 10th height percentile and 4.75 m in deciduous stands, whereas effects in evergreen coniferous stands were an order of magnitude smaller. Effect size alone proved a poor criterion of robustness: mean canopy height differed strongly yet preserved the ranking of pixels, amounting to a systematic offset that can be corrected, whereas the fractal box dimension shifted only slightly but reordered the ranking. Seasonal differences were largely independent of pulse density. Maximum height was the only metric largely unaffected by leaf condition. Metrics describing the lower canopy, point densities and the box dimension should not be compared across leaf conditions in deciduous stands. Robustness thus follows from how a metric is calculated rather than from the structural property it describes.
 
 ## Citation
 
@@ -13,18 +13,15 @@ TODO: add citation once the manuscript is published (authors, journal, DOI).
 <img src = "docs/pc_plot_transect.png" width = "800" height = "400">
 *Cross sections of leaf-on and leaf-off point clouds at different points per squaremeter (ppm).*
 
-*Cross sections of leaf-on and leaf-off point clouds at different points per square meter (ppm).*
-
 ## Data involved
 
-- Leaf-on (September 2023) and leaf-off (March 2024) ALS data, acquired with a Riegl VQ-780 II-S / Riegl VQ-780i, at three point densities (4, 10 and 20 pulses/m²).
-- Sample-based forest inventory ("Betriebsinventur") of Lower Saxony, used for tree species reference.
+- Leaf-on (September 2023) and leaf-off (March 2024) ALS data, acquired with a Riegl VQ-780 II-S / Riegl VQ-780i, downsampled three point densities (4, 10 and 20 pulses/m²).
 
 ## Data availability
 
 The point clouds are **not** included in this repository or in the GRO deposit. TODO: state the reason here (e.g. file size, licensing of the flight campaign, availability on request) so users know whether to expect them elsewhere.
 
-All derived data (metric rasters, CHM, metadata, and the validated pixel sample) are archived at GRO: TODO add GRO link.
+All derived data (metric rasters, metadata, and the validated pixel sample) are archived at GRO: TODO add GRO link.
 
 After downloading, place the contents so that they match the structure `src/setup.R` creates automatically:
 
@@ -34,10 +31,8 @@ data/
 │   ├── pc_leafon_2023/          # not included, see above
 │   └── pc_leafoff_2024/         # not included, see above
 ├── processed_data/
-│   ├── pc_leafon_2023/{ppm4,ppm10,ppm20}/
-│   ├── pc_leafoff_2024/{ppm4,ppm10,ppm20}/
-│   ├── chm_leafon/
-│   ├── chm_leafoff/
+│   ├── pc_leafon_2023/{ppm4,ppm10,ppm20}/  # not included, see above
+│   ├── pc_leafoff_2024/{ppm4,ppm10,ppm20}/  # not included, see above
 │   ├── metrics_leafon_2023/{ppm4,ppm10,ppm20}/
 │   └── metrics_leafoff_2024/{ppm4,ppm10,ppm20}/
 └── metadata/
@@ -50,6 +45,8 @@ You do not need to create these folders by hand. Running any script (they all so
 ## Workflow
 
 Run the scripts in `scripts/` in numerical order. Each script sources `src/setup.R` first, which builds the required folder structure and loads all dependencies.
+
+Scripts `01-04` require the raw point clouds, which are not distributed (see Data availability above). If you only have the GRO deposit, start from `script 05`.
 
 | # | Script | What it does |
 |---|---|---|
