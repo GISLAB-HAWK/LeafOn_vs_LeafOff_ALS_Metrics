@@ -235,10 +235,11 @@ diagnose_one <- function(v) {
   used <- as.integer(rownames(model.frame(m)))
   grp  <- droplevels(df_all$group[used])
   
-  # Random intercept share of the total variance
-  vc  <- as.data.frame(VarCorr(m))
-  v_id   <- vc$vcov[vc$grp == "ID"]
-  v_res  <- vc$vcov[vc$grp == "Residual"]
+  # Random intercept and random slope share of the total variance
+  vc      <- as.data.frame(VarCorr(m))
+  v_int   <- vc$vcov[vc$grp == "ID" & vc$var1 == "(Intercept)" & is.na(vc$var2)]
+  v_slope <- vc$vcov[vc$grp == "ID" & vc$var1 != "(Intercept)" & is.na(vc$var2)]
+  v_res   <- vc$vcov[vc$grp == "Residual"]
   
   # Equal residual variance across the season / density groups
   lev <- car::leveneTest(r ~ grp)
@@ -249,7 +250,8 @@ diagnose_one <- function(v) {
     shapiro_p     = shapiro.test(r)$p.value,
     skewness      = mean((r - mean(r))^3) / stats::sd(r)^3,
     levene_p      = lev$`Pr(>F)`[1],
-    icc           = v_id / (v_id + v_res),
+    icc_intercept = v_int / (v_int + v_res),
+    sd_slope      = sqrt(v_slope),
     singular      = isSingular(m),
     max_abs_scaled = max(abs(r / stats::sd(r)))
   )
