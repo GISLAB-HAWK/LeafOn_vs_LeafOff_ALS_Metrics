@@ -2,8 +2,8 @@
 # Name:         compare_metrics.R
 # Description:  Compare ABA metrics between leaf-on and leaf-off conditions
 #               at pixel level, using a balanced sample of validated pixels.
-#               Produces descriptive summaries, paired Wilcoxon tests and
-#               scatter / difference-density figures.
+#               Produces descriptive summaries, shapiro tests and
+#               paired Wilcoxon tests.
 # Author:       Svenja Dobelmann
 # Contact:      svenja.dobelmann@hawk.de
 #-------------------------------------------------------------------------------
