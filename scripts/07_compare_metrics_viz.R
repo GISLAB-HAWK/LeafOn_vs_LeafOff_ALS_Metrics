@@ -260,3 +260,5 @@ ggsave(file.path(output_dir, "figures",
 ggsave(file.path(output_dir, "figures",
                  paste0("pix_diff_distribution_", PPM, "_part2.png")),
        d2_final, units = FIG_UNITS, dpi = FIG_DPI, width = 16, height = 18)
+
+message("plots written to: ",  file.path(output_dir, "figures"))
