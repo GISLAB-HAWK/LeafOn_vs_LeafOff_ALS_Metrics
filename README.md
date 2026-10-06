@@ -11,7 +11,7 @@ Airborne laser scanning (ALS) campaigns of forests differ in canopy phenology, y
 TODO: add citation once the manuscript is published (authors, journal, DOI).
 
 <img src = "docs/Figure2_pointcloud_3d.png" width = "600" height = "800">
-*Cross sections of leaf-on and leaf-off point clouds at different points per squaremeter (ppm).*
+*Example pixel cells (Coniferous and Decidous) under leaf-on and leaf-off conditions (20 pls/m^2)*
 
 ## Data involved
 
