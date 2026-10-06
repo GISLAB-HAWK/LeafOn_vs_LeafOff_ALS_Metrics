@@ -60,6 +60,7 @@ Scripts `01-04` require the raw point clouds, which are not distributed (see Dat
 | 08 | `compare_structural_metrics.R` | Same comparison as script 06, for the structural metrics from script 04. |
 | 09 | `compare_structural_metrics_viz.R` | Figures for the structural metric comparison. One panel per metric, kernel density per season with a leaf-on vs. leaf-off scatter inset. |
 | 10 | `compare_point_density.R` | Compares metrics across leaf-on / leaf-off conditions and point density (4, 10, 20 pulses/m²) on the validated sample. Fits one linear mixed model per metric with pixel as a random intercept and a random leaf-on / leaf-off slope, tests model assumptions on the residuals, and writes the type III ANOVA and diagnostic tables. Runs on either metric set (`METRIC_SET <- "aba"` or `"struct"`). |
+| 11 | `visualize_point_cloud.R` | Create Figure 2 within Manuskript. 3D-Visualization of one deciduous and one coniferous example pixel under leaf-on and leaf-off conditions. | 
 
 Scripts 07, 09 and 10 depend on their corresponding upstream script having been run first for the same settings (see the `Requires:` note in each script header).
 
